@@ -74,56 +74,104 @@ static bool ExtractFile(const char *assetPath, const char *destPath)
     return ok;
 }
 
-// SDL3 provides SDL_EnumerateDirectory for Android asset enumeration
-static bool ExtractDir(const char *assetPrefix, const char *destBase);
+// -------------------------------------------------------------------------
+// Recursive enumeration helpers
+// -------------------------------------------------------------------------
 
+// Context for the SDL_EnumerateDirectory callback
 typedef struct
 {
-    const char *assetPrefix;
-    const char *destBase;
+    char        assetBase[512];   // root asset prefix (may be empty)
+    char        destBase[512];    // destination root path
     bool        ok;
 } EnumCtx;
 
+// Forward declaration
+static bool ExtractDirRecursive(const char *assetDir, const char *destDir);
+
+// SDL callback: called for each entry in a directory
 static SDL_EnumerationResult SDLCALL EnumCallback(void *userdata, const char *dirname, const char *fname)
 {
     EnumCtx *ctx = (EnumCtx *)userdata;
+    if (!ctx->ok) return SDL_ENUM_STOP;
 
+    // Build full asset path and destination path
     char assetPath[1024];
     char destPath[1024];
 
-    // Build the full asset path
     if (dirname && dirname[0])
         snprintf(assetPath, sizeof(assetPath), "%s/%s", dirname, fname);
     else
         snprintf(assetPath, sizeof(assetPath), "%s", fname);
 
-    // Build destination path: strip the assetPrefix from dirname, keep rest
-    // assetPrefix: e.g. ""  (assets root is already the data dir)
-    // dirname: e.g. "Data/System"
-    // destBase: e.g. "/data/data/io.jor.bugdom/files"
+    // Map assetPath → destPath by stripping any assetBase prefix
     const char *rel = assetPath;
-    if (ctx->assetPrefix && ctx->assetPrefix[0])
+    if (ctx->assetBase[0])
     {
-        size_t pfxLen = strlen(ctx->assetPrefix);
-        if (strncmp(assetPath, ctx->assetPrefix, pfxLen) == 0)
+        size_t pfxLen = strlen(ctx->assetBase);
+        if (strncmp(assetPath, ctx->assetBase, pfxLen) == 0)
             rel = assetPath + pfxLen + (assetPath[pfxLen] == '/' ? 1 : 0);
     }
     snprintf(destPath, sizeof(destPath), "%s/%s", ctx->destBase, rel);
 
-    // Try to extract as file; if it fails, treat as directory and recurse
-    if (!ExtractFile(assetPath, destPath))
-    {
-        // Might be a directory – recurse
-        char subAsset[1024];
-        snprintf(subAsset, sizeof(subAsset), "%s", assetPath);
-        mkdir(destPath, 0755);
-        EnumCtx subCtx = { NULL, ctx->destBase, true };
-        SDL_EnumerateDirectory(subAsset, EnumCallback, &subCtx);
-        if (!subCtx.ok) ctx->ok = false;
-    }
+    // Try to extract as a file
+    if (ExtractFile(assetPath, destPath))
+        return SDL_ENUM_CONTINUE;
+
+    // Extraction as file failed – treat as directory and recurse
+    mkdir(destPath, 0755);
+    if (!ExtractDirRecursive(assetPath, destPath))
+        ctx->ok = false;
 
     return SDL_ENUM_CONTINUE;
 }
+
+// Recursively extract assets from assetDir → destDir
+static bool ExtractDirRecursive(const char *assetDir, const char *destDir)
+{
+    mkdir(destDir, 0755);
+
+    EnumCtx ctx;
+    SDL_strlcpy(ctx.assetBase, assetDir, sizeof(ctx.assetBase));
+    SDL_strlcpy(ctx.destBase,  destDir,  sizeof(ctx.destBase));
+    ctx.ok = true;
+
+    if (!SDL_EnumerateDirectory(assetDir, EnumCallback, &ctx))
+    {
+        // SDL_EnumerateDirectory may fail if assetDir is a file; caller handles that
+        return false;
+    }
+
+    return ctx.ok;
+}
+
+// -------------------------------------------------------------------------
+// Public API
+// -------------------------------------------------------------------------
+
+// Known subdirectories in the Bugdom Data folder.
+// On Android, AAssetDir_getNextFileName does not list subdirectory names,
+// so we must enumerate each known directory explicitly.
+// List ALL directories (not just top-level), relative to the Data root.
+static const char *kAllDataDirs[] = {
+    "Audio",
+    "Audio/AntHill.sounds",
+    "Audio/Bonus.sounds",
+    "Audio/Forest.sounds",
+    "Audio/Hive.sounds",
+    "Audio/Lawn.sounds",
+    "Audio/Main.sounds",
+    "Audio/Night.sounds",
+    "Audio/Pond.sounds",
+    "Images",
+    "Images/Infobar",
+    "Images/Textures",
+    "Models",
+    "Skeletons",
+    "System",
+    "Terrain",
+    NULL
+};
 
 bool Android_ExtractAssets(const char *destDir, const char *prefix)
 {
@@ -137,7 +185,6 @@ bool Android_ExtractAssets(const char *destDir, const char *prefix)
         char ver[64] = "";
         if (fgets(ver, sizeof(ver), vf))
         {
-            // Trim newline
             size_t len = strlen(ver);
             while (len > 0 && (ver[len-1] == '\n' || ver[len-1] == '\r'))
                 ver[--len] = '\0';
@@ -155,14 +202,34 @@ bool Android_ExtractAssets(const char *destDir, const char *prefix)
     LOGI("Extracting game assets to %s ...", destDir);
     mkdir(destDir, 0755);
 
-    EnumCtx ctx;
-    ctx.assetPrefix = prefix;
-    ctx.destBase    = destDir;
-    ctx.ok          = true;
+    bool ok = true;
 
-    if (!SDL_EnumerateDirectory(prefix ? prefix : "", EnumCallback, &ctx) || !ctx.ok)
+    // Extract each known directory (all directories enumerated explicitly because
+    // Android's AAssetDir_getNextFileName does not return subdirectory names).
+    for (int i = 0; kAllDataDirs[i] != NULL; i++)
     {
-        LOGE("Asset extraction failed");
+        char assetSubDir[512];
+        char destSubDir[512];
+
+        if (prefix && prefix[0])
+            snprintf(assetSubDir, sizeof(assetSubDir), "%s/%s", prefix, kAllDataDirs[i]);
+        else
+            snprintf(assetSubDir, sizeof(assetSubDir), "%s", kAllDataDirs[i]);
+
+        snprintf(destSubDir, sizeof(destSubDir), "%s/%s", destDir, kAllDataDirs[i]);
+
+        LOGI("Extracting %s ...", assetSubDir);
+        mkdir(destSubDir, 0755);
+        if (!ExtractDirRecursive(assetSubDir, destSubDir))
+        {
+            LOGE("Failed to extract %s", assetSubDir);
+            ok = false;
+        }
+    }
+
+    if (!ok)
+    {
+        LOGE("Asset extraction had errors");
         return false;
     }
 
