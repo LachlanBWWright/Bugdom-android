@@ -791,6 +791,13 @@ void bridge_AlphaFunc(GLenum func, GLfloat ref)
 
 void bridge_Enable(GLenum cap)
 {
+    // GL_LIGHT0..GL_LIGHT7 (0x4000..0x4007)
+    if (cap >= 0x4000 && cap <= 0x4007)
+    {
+        gLights[cap - 0x4000].enabled = true;
+        return;
+    }
+
     switch (cap)
     {
         case 0x0B50: gLightingEnabled      = true;  break; // GL_LIGHTING
@@ -809,6 +816,13 @@ void bridge_Enable(GLenum cap)
 
 void bridge_Disable(GLenum cap)
 {
+    // GL_LIGHT0..GL_LIGHT7
+    if (cap >= 0x4000 && cap <= 0x4007)
+    {
+        gLights[cap - 0x4000].enabled = false;
+        return;
+    }
+
     switch (cap)
     {
         case 0x0B50: gLightingEnabled      = false; break;
@@ -826,6 +840,9 @@ void bridge_Disable(GLenum cap)
 
 bool bridge_IsEnabled(GLenum cap)
 {
+    if (cap >= 0x4000 && cap <= 0x4007)
+        return gLights[cap - 0x4000].enabled;
+
     switch (cap)
     {
         case 0x0B50: return gLightingEnabled;

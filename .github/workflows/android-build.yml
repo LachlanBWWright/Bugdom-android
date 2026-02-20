@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: ["**"]
 
+permissions:
+  contents: read
+
 jobs:
   build-android-apk:
     name: Build Android APK
@@ -23,9 +26,6 @@ jobs:
         with:
           java-version: "17"
           distribution: "temurin"
-
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
 
       - name: Clone SDL3
         run: git clone --depth 1 https://github.com/libsdl-org/SDL.git extern/SDL
@@ -46,6 +46,10 @@ jobs:
         run: |
           sdkmanager "cmake;3.22.1"
           sdkmanager "ndk;27.2.12479018"
+
+      - name: Generate Gradle wrapper
+        working-directory: android
+        run: gradle wrapper --gradle-version=8.9
 
       - name: Build Debug APK
         working-directory: android

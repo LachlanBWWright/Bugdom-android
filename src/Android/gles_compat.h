@@ -61,6 +61,8 @@ void bridge_Frustum(GLdouble left, GLdouble right, GLdouble bottom, GLdouble top
 #define GL_SHININESS    0x1601
 #define GL_AMBIENT_AND_DIFFUSE  0x1602
 
+#define GL_LIGHT_MODEL_AMBIENT  0x0B53
+
 #define GL_FRONT_AND_BACK 0x0408
 #define GL_FRONT          0x0404
 #define GL_BACK           0x0405

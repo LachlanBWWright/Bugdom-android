@@ -35,6 +35,7 @@ static fs::path FindGameData(const char* executablePath)
 
 #ifdef __ANDROID__
 	// On Android: extract assets from APK to internal storage, then point there.
+	// The APK assets have game data files directly at the root (Data/ dir contents).
 	const char* internalPath = SDL_GetPrefPath("io.jor.bugdom", "Bugdom");
 	if (!internalPath)
 		throw std::runtime_error("Couldn't get internal storage path.");
@@ -42,7 +43,9 @@ static fs::path FindGameData(const char* executablePath)
 	if (!Android_ExtractAssets(internalPath, ""))
 		throw std::runtime_error("Couldn't extract game assets.");
 
-	dataPath = fs::path(internalPath) / "Data";
+	// assets.srcDirs points to Data/, so assets root = Data root
+	// (System/, Levels/, Models/ etc. are directly under internalPath)
+	dataPath = fs::path(internalPath);
 	SDL_free((void*)internalPath);
 	dataPath = dataPath.lexically_normal();
 	gDataSpec = Pomme::Files::HostPathToFSSpec(dataPath / "System");
