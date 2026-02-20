@@ -10,6 +10,7 @@
 #include "PommeFiles.h"
 
 #ifdef __ANDROID__
+#include <stdlib.h>  // for setenv/getenv
 #include "AndroidAssets.h"
 #include "GLESBridge.h"
 #endif
@@ -114,6 +115,17 @@ static void Boot(int argc, char** argv)
 	SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
 #else
 	SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
+#endif
+
+#ifdef __ANDROID__
+	// Ensure HOME env var is set so Pomme can find the preferences folder.
+	// On Android, HOME may not be set, causing FindFolder to fail.
+	if (!getenv("HOME"))
+	{
+		const char* internalPath = SDL_GetAndroidInternalStoragePath();
+		if (internalPath)
+			setenv("HOME", internalPath, 1);
+	}
 #endif
 
 	// Start our "machine"

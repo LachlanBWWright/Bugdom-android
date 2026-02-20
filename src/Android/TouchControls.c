@@ -155,9 +155,13 @@ void TouchControls_Shutdown(void)
 bool TouchControls_ProcessEvent(const SDL_Event *event)
 {
     // Update window dimensions each time (cheap)
-    SDL_Window *win = SDL_GetMouseFocus();
-    if (win)
-        SDL_GetWindowSizeInPixels(win, &gWindowW, &gWindowH);
+    {
+        int count = 0;
+        SDL_Window **wins = SDL_GetWindows(&count);
+        if (wins && count > 0)
+            SDL_GetWindowSizeInPixels(wins[0], &gWindowW, &gWindowH);
+        SDL_free(wins);
+    }
     UpdateButtonPositions();
 
     if (event->type != SDL_EVENT_FINGER_DOWN &&
@@ -375,9 +379,13 @@ static void DrawCircleOutline(float cx, float cy, float radius, int segs,
 
 void TouchControls_Draw(void)
 {
-    SDL_Window *win = SDL_GetMouseFocus();
-    if (!win) return;
-    SDL_GetWindowSizeInPixels(win, &gOvlW, &gOvlH);
+    {
+        int count = 0;
+        SDL_Window **wins = SDL_GetWindows(&count);
+        if (!wins || count == 0) { SDL_free(wins); return; }
+        SDL_GetWindowSizeInPixels(wins[0], &gOvlW, &gOvlH);
+        SDL_free(wins);
+    }
     UpdateButtonPositions();
 
     // Save/restore some GL state

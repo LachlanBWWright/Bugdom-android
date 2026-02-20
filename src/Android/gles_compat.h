@@ -124,9 +124,6 @@ void bridge_Enable(GLenum cap);
 void bridge_Disable(GLenum cap);
 bool bridge_IsEnabled(GLenum cap);
 
-// ColorMaterial is tracked for use in shader
-void bridge_ColorMaterialSet(GLenum face, GLenum mode);
-
 // -------------------------------------------------------------------------
 // Client state / vertex arrays
 // -------------------------------------------------------------------------
