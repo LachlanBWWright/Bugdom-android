@@ -4,6 +4,8 @@
 
 #ifdef __ANDROID__
 
+#include <stdbool.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif

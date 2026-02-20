@@ -9,6 +9,11 @@
 #include <GLES3/gl3.h>
 #include <stdbool.h>
 
+// GLdouble is not defined by GLES3 headers; define it here so that callers
+// that use glOrtho / glFrustum (which take double parameters on desktop GL)
+// can compile without changes.
+typedef double GLdouble;
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -257,10 +262,24 @@ void bridge_FlushState(void);
 #define glPolygonMode       bridge_PolygonMode
 
 // Redirect unsupported enums / formats
-// GL_BGRA is not guaranteed in GLES3 – use GL_RGBA with pre-swapped data
-// GL_UNSIGNED_INT_8_8_8_8_REV is not in GLES3 – handled in texture loading
-// GL_UNSIGNED_SHORT_1_5_5_5_REV is not in GLES3 – handled in texture loading
-// GL_BGR is not in GLES3 – handled in texture loading
+// These desktop-GL / extension constants are not defined by GLES3/gl3.h.
+// We define them here as their standard hex values so code that
+// references them by name still compiles.  The texture-loading code in
+// Renderer.c detects these values and swizzles the data to a GLES3-safe
+// format (GL_RGBA / GL_UNSIGNED_BYTE) before calling glTexImage2D, so the
+// values are never passed to a real GLES3 entry-point.
+#ifndef GL_BGRA
+#define GL_BGRA                         0x80E1
+#endif
+#ifndef GL_BGR
+#define GL_BGR                          0x80E0
+#endif
+#ifndef GL_UNSIGNED_INT_8_8_8_8_REV
+#define GL_UNSIGNED_INT_8_8_8_8_REV     0x8367
+#endif
+#ifndef GL_UNSIGNED_SHORT_1_5_5_5_REV
+#define GL_UNSIGNED_SHORT_1_5_5_5_REV   0x8366
+#endif
 
 // Legacy fog/alpha/lighting enums that overlap with core GLES3 values
 // (keep as-is; they're defined above where missing)

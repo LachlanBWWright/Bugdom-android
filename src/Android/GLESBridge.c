@@ -11,6 +11,10 @@
 #include <stdlib.h>
 #include <stdbool.h>
 
+// GLdouble is not in GLES3; define it so that bridge_Ortho / bridge_Frustum
+// (which mirror the desktop glOrtho/glFrustum signatures) compile cleanly.
+typedef double GLdouble;
+
 #define LOGI(...)  __android_log_print(ANDROID_LOG_INFO,  "Bugdom", __VA_ARGS__)
 #define LOGW(...)  __android_log_print(ANDROID_LOG_WARN,  "Bugdom", __VA_ARGS__)
 #define LOGE(...)  __android_log_print(ANDROID_LOG_ERROR, "Bugdom", __VA_ARGS__)

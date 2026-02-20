@@ -93,7 +93,7 @@ static bool ExtractDirRecursive(const char *assetDir, const char *destDir);
 static SDL_EnumerationResult SDLCALL EnumCallback(void *userdata, const char *dirname, const char *fname)
 {
     EnumCtx *ctx = (EnumCtx *)userdata;
-    if (!ctx->ok) return SDL_ENUM_STOP;
+    if (!ctx->ok) return SDL_ENUM_FAILURE;
 
     // Build full asset path and destination path
     char assetPath[1024];
