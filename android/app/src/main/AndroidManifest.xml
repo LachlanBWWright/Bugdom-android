@@ -12,7 +12,7 @@
         android:theme="@android:style/Theme.NoTitleBar.Fullscreen">
 
         <activity
-            android:name="org.libsdl.app.SDLActivity"
+            android:name="io.jor.bugdom.BugdomActivity"
             android:exported="true"
             android:configChanges="orientation|screenSize|screenLayout|smallestScreenSize|uiMode|keyboard|keyboardHidden|navigation|density"
             android:screenOrientation="sensorLandscape"
