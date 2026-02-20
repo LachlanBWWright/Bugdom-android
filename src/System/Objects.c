@@ -10,6 +10,9 @@
 /***************/
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "gles_compat.h"
+#endif
 
 
 /****************************/

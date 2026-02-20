@@ -11,6 +11,9 @@
 /***************/
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "TouchControls.h"
+#endif
 
 
 /**********************/
@@ -341,6 +344,32 @@ void UpdateKeyMap(void)
 		if (gSDLGamepad && kb->gamepadButton != SDL_GAMEPAD_BUTTON_INVALID)
 			downNow |= 0 != SDL_GetGamepadButton(gSDLGamepad, kb->gamepadButton);
 
+#ifdef __ANDROID__
+		// Map touch buttons to game actions
+		switch (i)
+		{
+			case kKey_Jump:         downNow |= TouchControls_IsButtonDown(kTouchBtn_Jump);   break;
+			case kKey_BuddyAttack:  downNow |= TouchControls_IsButtonDown(kTouchBtn_Attack); break;
+			case kKey_Kick:         downNow |= TouchControls_IsButtonDown(kTouchBtn_Kick);   break;
+			case kKey_MorphPlayer:  downNow |= TouchControls_IsButtonDown(kTouchBtn_Pickup); break;
+			case kKey_Pause:        downNow |= TouchControls_IsButtonDown(kTouchBtn_Pause);  break;
+			default: break;
+		}
+		// Also handle joystick directions as digital keys for menus
+		{
+			float jx = TouchControls_GetJoystickX();
+			float jy = TouchControls_GetJoystickY();
+			switch (i)
+			{
+				case kKey_Left:     downNow |= (jx < -0.5f); break;
+				case kKey_Right:    downNow |= (jx >  0.5f); break;
+				case kKey_Forward:  downNow |= (jy >  0.5f); break;
+				case kKey_Backward: downNow |= (jy < -0.5f); break;
+				default: break;
+			}
+		}
+#endif
+
 		UpdateKeyState(&gKeyStates[i], downNow);
 	}
 
@@ -491,6 +520,20 @@ void GetMouseDelta(float *dx, float *dy)
 			return;
 		}
 	}
+
+#ifdef __ANDROID__
+		/* SEE IF OVERRIDE MOUSE WITH TOUCH JOYSTICK */
+	{
+		float jx = TouchControls_GetJoystickX();
+		float jy = TouchControls_GetJoystickY();
+		if (jx != 0 || jy != 0)
+		{
+			*dx = gFramesPerSecondFrac * 1600.0f * jx;
+			*dy = gFramesPerSecondFrac * 1600.0f * (-jy);  // Y is inverted in game coords
+			return;
+		}
+	}
+#endif
 
 		/* GET MOUSE MOVEMENT */
 

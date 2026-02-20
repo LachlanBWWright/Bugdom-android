@@ -3,6 +3,10 @@
 // This file is part of Bugdom. https://github.com/jorio/bugdom
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "gles_compat.h"
+#include "TouchControls.h"
+#endif
 
 char					gTypedAsciiKey = '\0';
 
@@ -85,6 +89,10 @@ void DoSDLMaintenance(void)
 	SDL_Event event;
 	while (SDL_PollEvent(&event))
 	{
+#ifdef __ANDROID__
+		if (TouchControls_ProcessEvent(&event))
+			continue;
+#endif
 		switch (event.type)
 		{
 			case SDL_EVENT_QUIT:
@@ -135,7 +143,8 @@ void DoSDLMaintenance(void)
 		gDebugMode %= NUM_DEBUG_MODES;
 		gDebugTextLastUpdatedAt = 0;
 		QD3D_UpdateDebugTextMesh(NULL);
-
+#ifndef __ANDROID__
 		glPolygonMode(GL_FRONT_AND_BACK, gDebugMode == DEBUG_MODE_WIREFRAME? GL_LINE: GL_FILL);
+#endif
 	}
 }

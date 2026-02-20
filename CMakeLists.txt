@@ -78,6 +78,12 @@ if(NOT DEFINED SDL3_DIR)
 	unset(_sdl3_maybe)
 endif()
 
+if(ANDROID)
+	# Android always builds SDL from source
+	set(BUILD_SDL_FROM_SOURCE ON CACHE BOOL "Build SDL from source for Android" FORCE)
+	set(SDL_STATIC OFF CACHE BOOL "Use shared SDL on Android" FORCE)
+endif()
+
 if(NOT BUILD_SDL_FROM_SOURCE)
 	find_package(SDL3 CONFIG REQUIRED)
 	message("Found pre-built SDL3")
@@ -95,7 +101,9 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-find_package(OpenGL REQUIRED)
+if(NOT ANDROID)
+	find_package(OpenGL REQUIRED)
+endif()
 
 #------------------------------------------------------------------------------
 # EXECUTABLE TARGET
@@ -119,9 +127,17 @@ elseif(APPLE)
 	set_source_files_properties(${CMAKE_SOURCE_DIR}/packaging/${GAME_TARGET}.icns PROPERTIES MACOSX_PACKAGE_LOCATION "Resources")
 endif()
 
-add_executable(${GAME_TARGET} ${GAME_SOURCES})
+if(ANDROID)
+	# Android requires a shared library loaded by SDL's Java layer
+	add_library(${GAME_TARGET} SHARED ${GAME_SOURCES})
+else()
+	add_executable(${GAME_TARGET} ${GAME_SOURCES})
+endif()
 
 target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Headers)
+if(ANDROID)
+	target_include_directories(${GAME_TARGET} PRIVATE ${GAME_SRCDIR}/Android)
+endif()
 
 #------------------------------------------------------------------------------
 # COMPILER/LINKER OPTIONS
@@ -197,7 +213,7 @@ if(SANITIZE)
 endif()
 
 # Explicitly link math lib on Linux
-if(NOT APPLE AND NOT WIN32)
+if(NOT APPLE AND NOT WIN32 AND NOT ANDROID)
 	target_link_libraries(${GAME_TARGET} PRIVATE m)
 endif()
 
@@ -209,7 +225,11 @@ else()
 endif()
 
 # Link core dependencies
-target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
+if(ANDROID)
+	target_link_libraries(${GAME_TARGET} PRIVATE Pomme GLESv3 log android)
+else()
+	target_link_libraries(${GAME_TARGET} PRIVATE Pomme OpenGL::GL)
+endif()
 
 # Add required frameworks for KillMacMouseAcceleration
 if(APPLE)

@@ -10,6 +10,16 @@
 /***************/
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "gles_compat.h"
+// GL_BGRA_EXT = GL_BGRA = 0x80E1 (same value)
+#ifndef GL_BGRA_EXT
+#define GL_BGRA_EXT 0x80E1
+#endif
+#ifndef GL_UNSIGNED_SHORT_1_5_5_5_REV
+#define GL_UNSIGNED_SHORT_1_5_5_5_REV 0x8366
+#endif
+#endif
 
 
 /****************************/

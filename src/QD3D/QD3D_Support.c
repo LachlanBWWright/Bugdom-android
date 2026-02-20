@@ -11,7 +11,12 @@
 /****************************/
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "gles_compat.h"
+#include "TouchControls.h"
+#else
 #include <SDL3/SDL_opengl.h>
+#endif
 
 
 /****************************/
@@ -335,6 +340,10 @@ void QD3D_DrawScene(QD3DSetupOutputType *setupInfo, void (*drawRoutine)(const QD
 	}
 
 	Render_EndFrame();
+
+#ifdef __ANDROID__
+	TouchControls_Draw();
+#endif
 
 	SDL_GL_SwapWindow(gSDLWindow);
 }

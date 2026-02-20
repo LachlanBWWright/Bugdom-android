@@ -1,7 +1,11 @@
 #pragma once
 
 #include <QD3D.h>
+#ifdef __ANDROID__
+#include "gles_compat.h"
+#else
 #include <SDL3/SDL_opengl.h>
+#endif
 
 #if _DEBUG
 #define CHECK_GL_ERROR()												\

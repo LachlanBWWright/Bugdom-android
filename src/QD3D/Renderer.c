@@ -9,7 +9,13 @@
 
 #include "game.h"
 #include <SDL3/SDL.h>
+#ifdef __ANDROID__
+#include "gles_compat.h"
+#include "GLESBridge.h"
+#include "TouchControls.h"
+#else
 #include <SDL3/SDL_opengl.h>
+#endif
 #include <QD3D.h>
 
 
@@ -236,12 +242,20 @@ void Render_CreateContext(void)
 	// On Windows, proc addresses are only valid for the current context,
 	// so we must get proc addresses everytime we recreate the context.
 	//Render_GetGLProcAddresses();
+
+#ifdef __ANDROID__
+	GLESBridge_Init();
+	TouchControls_Init();
+#endif
 }
 
 void Render_DeleteContext(void)
 {
 	if (gGLContext)
 	{
+#ifdef __ANDROID__
+		GLESBridge_Shutdown();
+#endif
 		SDL_GL_DestroyContext(gGLContext);
 		gGLContext = NULL;
 	}
@@ -376,6 +390,87 @@ GLuint Render_LoadTexture(
 	if (flags & kRendererTextureFlags_ClampV)
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
+#ifdef __ANDROID__
+	// GLES 3.0 does not support GL_BGRA, GL_BGR, GL_UNSIGNED_INT_8_8_8_8_REV,
+	// or GL_UNSIGNED_SHORT_1_5_5_5_REV.  Convert pixel data to RGBA/RGB before upload.
+	{
+		const uint8_t *src = (const uint8_t *)pixels;
+		int numPixels = width * height;
+		GLenum uploadFormat = internalFormat;
+		GLenum uploadType   = GL_UNSIGNED_BYTE;
+		uint8_t *converted  = NULL;
+
+		// GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV:
+		//   Mac ARGB big-endian -> in LE memory bytes are [BB][GG][RR][AA]
+		//   Convert to [RR][GG][BB][AA] for GL_RGBA / GL_UNSIGNED_BYTE
+		if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
+		    (bufferType   == 0x8367 /* GL_UNSIGNED_INT_8_8_8_8_REV */))
+		{
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 4);
+			const uint8_t *in = src;
+			uint8_t       *out = converted;
+			for (int p = 0; p < numPixels; p++, in += 4, out += 4)
+			{
+				out[0] = in[2]; // R  (was B position)
+				out[1] = in[1]; // G
+				out[2] = in[0]; // B  (was R position)
+				out[3] = in[3]; // A
+			}
+			uploadFormat = (internalFormat == GL_RGB) ? GL_RGBA : GL_RGBA;
+			uploadType   = GL_UNSIGNED_BYTE;
+		}
+		// GL_BGRA + GL_UNSIGNED_SHORT_1_5_5_5_REV:
+		//   Expand to 8-bit RGBA for simplicity
+		else if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
+		         (bufferType   == 0x8366 /* GL_UNSIGNED_SHORT_1_5_5_5_REV */))
+		{
+			const uint16_t *in16 = (const uint16_t *)src;
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 4);
+			uint8_t *out = converted;
+			for (int p = 0; p < numPixels; p++, in16++, out += 4)
+			{
+				uint16_t pix = *in16;
+				// 1_5_5_5_REV: bit[0] = A, bits[1-5] = R, bits[6-10] = G, bits[11-15] = B
+				out[0] = (uint8_t)(((pix >>  1) & 0x1F) * 255 / 31); // R
+				out[1] = (uint8_t)(((pix >>  6) & 0x1F) * 255 / 31); // G
+				out[2] = (uint8_t)(((pix >> 11) & 0x1F) * 255 / 31); // B
+				out[3] = (pix & 1) ? 255 : 0;                         // A
+			}
+			uploadFormat = GL_RGBA;
+			uploadType   = GL_UNSIGNED_BYTE;
+		}
+		// GL_BGR + GL_UNSIGNED_BYTE: swap R and B
+		else if (bufferFormat == 0x80E0 /* GL_BGR */)
+		{
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 3);
+			const uint8_t *in = src;
+			uint8_t       *out = converted;
+			for (int p = 0; p < numPixels; p++, in += 3, out += 3)
+			{
+				out[0] = in[2]; // R
+				out[1] = in[1]; // G
+				out[2] = in[0]; // B
+			}
+			uploadFormat = GL_RGB;
+			uploadType   = GL_UNSIGNED_BYTE;
+		}
+
+		glTexImage2D(
+				GL_TEXTURE_2D,
+				0,
+				uploadFormat,
+				width,
+				height,
+				0,
+				uploadFormat,
+				uploadType,
+				converted ? (const GLvoid *)converted : pixels);
+		CHECK_GL_ERROR();
+
+		if (converted)
+			SDL_free(converted);
+	}
+#else
 	glTexImage2D(
 			GL_TEXTURE_2D,
 			0,						// mipmap level
@@ -387,6 +482,7 @@ GLuint Render_LoadTexture(
 			bufferType,				// size of each r,g,b
 			pixels);				// pointer to the actual texture pixels
 	CHECK_GL_ERROR();
+#endif
 
 	return textureName;
 }
@@ -413,6 +509,62 @@ void Render_UpdateTexture(
 		glPixelStorei(GL_UNPACK_ROW_LENGTH, rowBytesInInput);
 	}
 
+#ifdef __ANDROID__
+	// Convert BGRA / BGR formats to RGBA / RGB for GLES3 compatibility
+	{
+		const uint8_t *src = (const uint8_t *)pixels;
+		int numPixels = width * height;
+		GLenum uploadFormat = bufferFormat;
+		GLenum uploadType   = bufferType;
+		uint8_t *converted  = NULL;
+
+		if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
+		    (bufferType   == 0x8367 /* GL_UNSIGNED_INT_8_8_8_8_REV */))
+		{
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 4);
+			const uint8_t *in = src; uint8_t *out = converted;
+			for (int p = 0; p < numPixels; p++, in += 4, out += 4)
+			{ out[0] = in[2]; out[1] = in[1]; out[2] = in[0]; out[3] = in[3]; }
+			uploadFormat = GL_RGBA; uploadType = GL_UNSIGNED_BYTE;
+		}
+		else if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
+		         (bufferType   == 0x8366 /* GL_UNSIGNED_SHORT_1_5_5_5_REV */))
+		{
+			const uint16_t *in16 = (const uint16_t *)src;
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 4);
+			uint8_t *out = converted;
+			for (int p = 0; p < numPixels; p++, in16++, out += 4)
+			{
+				uint16_t pix = *in16;
+				out[0] = (uint8_t)(((pix >>  1) & 0x1F) * 255 / 31);
+				out[1] = (uint8_t)(((pix >>  6) & 0x1F) * 255 / 31);
+				out[2] = (uint8_t)(((pix >> 11) & 0x1F) * 255 / 31);
+				out[3] = (pix & 1) ? 255 : 0;
+			}
+			uploadFormat = GL_RGBA; uploadType = GL_UNSIGNED_BYTE;
+		}
+		else if (bufferFormat == 0x80E0 /* GL_BGR */)
+		{
+			converted = (uint8_t *)SDL_malloc((size_t)numPixels * 3);
+			const uint8_t *in = src; uint8_t *out = converted;
+			for (int p = 0; p < numPixels; p++, in += 3, out += 3)
+			{ out[0] = in[2]; out[1] = in[1]; out[2] = in[0]; }
+			uploadFormat = GL_RGB; uploadType = GL_UNSIGNED_BYTE;
+		}
+
+		if (rowBytesInInput > 0)
+		{
+			// Row length was set above; clear it for converted data
+			glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+		}
+
+		glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height,
+				uploadFormat, uploadType,
+				converted ? (const GLvoid *)converted : pixels);
+		CHECK_GL_ERROR();
+		if (converted) SDL_free(converted);
+	}
+#else
 	glTexSubImage2D(
 			GL_TEXTURE_2D,
 			0,
@@ -424,6 +576,7 @@ void Render_UpdateTexture(
 			bufferType,
 			pixels);
 	CHECK_GL_ERROR();
+#endif
 
 	// Restore unpack row length
 	if (rowBytesInInput > 0)

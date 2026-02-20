@@ -9,6 +9,11 @@
 #include "PommeInit.h"
 #include "PommeFiles.h"
 
+#ifdef __ANDROID__
+#include "AndroidAssets.h"
+#include "GLESBridge.h"
+#endif
+
 extern "C"
 {
 	#include "game.h"
@@ -28,6 +33,27 @@ static fs::path FindGameData(const char* executablePath)
 {
 	fs::path dataPath;
 
+#ifdef __ANDROID__
+	// On Android: extract assets from APK to internal storage, then point there.
+	const char* internalPath = SDL_GetPrefPath("io.jor.bugdom", "Bugdom");
+	if (!internalPath)
+		throw std::runtime_error("Couldn't get internal storage path.");
+
+	if (!Android_ExtractAssets(internalPath, ""))
+		throw std::runtime_error("Couldn't extract game assets.");
+
+	dataPath = fs::path(internalPath) / "Data";
+	SDL_free((void*)internalPath);
+	dataPath = dataPath.lexically_normal();
+	gDataSpec = Pomme::Files::HostPathToFSSpec(dataPath / "System");
+
+	FSSpec someDataFileSpec;
+	OSErr iErr = FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":System:gamecontrollerdb.txt", &someDataFileSpec);
+	if (iErr)
+		throw std::runtime_error("Couldn't find gamecontrollerdb.txt in extracted assets.");
+
+	return dataPath;
+#else
 	int attemptNum = 0;
 
 #if !(__APPLE__)
@@ -73,6 +99,7 @@ tryAgain:
 	}
 
 	return dataPath;
+#endif
 }
 
 static void Boot(int argc, char** argv)
@@ -100,6 +127,13 @@ retryVideo:
 	}
 
 	// Create window
+#ifdef __ANDROID__
+	// Request OpenGL ES 3.0 for Android
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+	gCurrentAntialiasingLevel = 0;  // MSAA handled separately on Android
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
@@ -110,7 +144,15 @@ retryVideo:
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
 		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, 1 << gCurrentAntialiasingLevel);
 	}
+#endif
 
+#ifdef __ANDROID__
+	// On Android, use fullscreen native resolution
+	gSDLWindow = SDL_CreateWindow(
+		GAME_FULL_NAME,
+		0, 0,
+		SDL_WINDOW_OPENGL | SDL_WINDOW_FULLSCREEN | SDL_WINDOW_HIGH_PIXEL_DENSITY);
+#else
 	// Determine display
 	SDL_DisplayID display = gGamePrefs.displayNumMinus1 + 1;
 	if ((int) display > GetNumDisplays())
@@ -131,6 +173,7 @@ retryVideo:
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
 	MoveToPreferredDisplay();
+#endif
 
 	if (!gSDLWindow)
 	{
