@@ -33,6 +33,8 @@
 #define PAUSE_RADIUS_NORM 0.04f
 
 #define DEAD_ZONE       0.15f
+#define BTN_HIT_MULTIPLIER  1.3f   // generous button hit area
+#define JOY_HIT_MULTIPLIER  1.4f   // generous joystick hit area
 
 // -------------------------------------------------------------------------
 // State
@@ -95,7 +97,7 @@ static int HitButton(float x, float y)
     {
         float dx = x - gBtnCX[i];
         float dy = y - gBtnCY[i];
-        float r  = BtnRadius(i) * 1.3f;   // generous hit area
+        float r  = BtnRadius(i) * BTN_HIT_MULTIPLIER;
         if (dx*dx + dy*dy <= r*r)
             return i;
     }
@@ -106,7 +108,7 @@ static bool HitJoystick(float x, float y)
 {
     float jcx = NormX(JOY_CX_NORM);
     float jcy = NormY(JOY_CY_NORM);
-    float r   = JoyRadius() * 1.4f;
+    float r   = JoyRadius() * JOY_HIT_MULTIPLIER;
     float dx  = x - jcx;
     float dy  = y - jcy;
     return dx*dx + dy*dy <= r*r;

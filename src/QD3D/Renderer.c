@@ -416,7 +416,7 @@ GLuint Render_LoadTexture(
 				out[2] = in[0]; // B  (was R position)
 				out[3] = in[3]; // A
 			}
-			uploadFormat = (internalFormat == GL_RGB) ? GL_RGBA : GL_RGBA;
+			uploadFormat = GL_RGBA;  // BGRA → RGBA (always 4 channels)
 			uploadType   = GL_UNSIGNED_BYTE;
 		}
 		// GL_BGRA + GL_UNSIGNED_SHORT_1_5_5_5_REV:

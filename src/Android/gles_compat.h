@@ -268,7 +268,8 @@ void bridge_FlushState(void);
 // Legacy fog/alpha/lighting enums that overlap with core GLES3 values
 // (keep as-is; they're defined above where missing)
 
-// Stub out desktop-only enums that aren't used on Android
-#define GL_UNPACK_ROW_LENGTH    0x0CF2  // supported in GLES3
+// GL_UNPACK_ROW_LENGTH is supported in GLES3 but must be defined for code
+// that was written for desktop GL where it comes from SDL_opengl.h.
+#define GL_UNPACK_ROW_LENGTH    0x0CF2
 
 #endif // __ANDROID__
