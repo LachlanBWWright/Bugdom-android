@@ -88,11 +88,16 @@ if(NOT BUILD_SDL_FROM_SOURCE)
 	find_package(SDL3 CONFIG REQUIRED)
 	message("Found pre-built SDL3")
 else()
-	if(NOT DEFINED SDL3_DIR)
-		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL")
+	set(_sdl3_src "${CMAKE_SOURCE_DIR}/extern/SDL")
+	if(DEFINED SDL3_DIR AND EXISTS "${SDL3_DIR}/CMakeLists.txt")
+		set(_sdl3_src "${SDL3_DIR}")
 	endif()
-	message("Building SDL3 from source: " ${SDL3_DIR})
-	add_subdirectory("${SDL3_DIR}" EXCLUDE_FROM_ALL)
+	set(_sdl3_bin "${CMAKE_BINARY_DIR}/extern/SDL")
+	message("Building SDL3 from source: " ${_sdl3_src})
+	add_subdirectory("${_sdl3_src}" "${_sdl3_bin}" EXCLUDE_FROM_ALL)
+	# SDL3Config.cmake is generated in the binary dir; point SDL3_DIR there so
+	# downstream find_package(SDL3) calls (e.g. from Pomme) can find it.
+	set(SDL3_DIR "${_sdl3_bin}" CACHE PATH "SDL3 build dir" FORCE)
 endif()
 
 #------------------------------------------------------------------------------
