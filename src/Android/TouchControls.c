@@ -22,10 +22,10 @@
 #define JOY_RADIUS_NORM 0.09f
 
 // Action buttons – right side (diamond layout)
-#define BTN_CX_NORM     0.88f
+#define BTN_CX_NORM     0.82f
 #define BTN_CY_NORM     0.65f
-#define BTN_RADIUS_NORM 0.055f
-#define BTN_SPACING     0.085f
+#define BTN_RADIUS_NORM 0.048f
+#define BTN_SPACING     0.075f
 
 // Pause button – top-right corner
 #define PAUSE_CX_NORM   0.95f

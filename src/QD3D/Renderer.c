@@ -396,13 +396,15 @@ GLuint Render_LoadTexture(
 	{
 		const uint8_t *src = (const uint8_t *)pixels;
 		int numPixels = width * height;
-		GLenum uploadFormat = internalFormat;
-		GLenum uploadType   = GL_UNSIGNED_BYTE;
+		// Start with the actual data format (not internalFormat) so GLES3 sees a
+		// compatible (internalFormat, format, type) triplet in glTexImage2D.
+		GLenum uploadFormat = bufferFormat;
+		GLenum uploadType   = bufferType;
 		uint8_t *converted  = NULL;
 
 		// GL_BGRA + GL_UNSIGNED_INT_8_8_8_8_REV:
-		//   Mac ARGB big-endian -> in LE memory bytes are [BB][GG][RR][AA]
-		//   Convert to [RR][GG][BB][AA] for GL_RGBA / GL_UNSIGNED_BYTE
+		//   After Pomme's big-endian byteswap, memory layout is [B][G][R][A].
+		//   Convert to [R][G][B][A] for GL_RGBA / GL_UNSIGNED_BYTE.
 		if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
 		    (bufferType   == 0x8367 /* GL_UNSIGNED_INT_8_8_8_8_REV */))
 		{
@@ -416,11 +418,14 @@ GLuint Render_LoadTexture(
 				out[2] = in[0]; // B  (was R position)
 				out[3] = in[3]; // A
 			}
-			uploadFormat = GL_RGBA;  // BGRA → RGBA (always 4 channels)
+			uploadFormat = GL_RGBA;
 			uploadType   = GL_UNSIGNED_BYTE;
 		}
 		// GL_BGRA + GL_UNSIGNED_SHORT_1_5_5_5_REV:
-		//   Expand to 8-bit RGBA for simplicity
+		//   After Pomme's byteswap the uint16 value has:
+		//     bit[15]=A, bits[14:10]=R, bits[9:5]=G, bits[4:0]=B
+		//   (matches ARGB 1-5-5-5 big-endian layout from original PowerPC game).
+		//   Expand to 8-bit RGBA.
 		else if ((bufferFormat == 0x80E1 /* GL_BGRA */) &&
 		         (bufferType   == 0x8366 /* GL_UNSIGNED_SHORT_1_5_5_5_REV */))
 		{
@@ -430,11 +435,11 @@ GLuint Render_LoadTexture(
 			for (int p = 0; p < numPixels; p++, in16++, out += 4)
 			{
 				uint16_t pix = *in16;
-				// 1_5_5_5_REV: bit[0] = A, bits[1-5] = R, bits[6-10] = G, bits[11-15] = B
-				out[0] = (uint8_t)(((pix >>  1) & 0x1F) * 255 / 31); // R
-				out[1] = (uint8_t)(((pix >>  6) & 0x1F) * 255 / 31); // G
-				out[2] = (uint8_t)(((pix >> 11) & 0x1F) * 255 / 31); // B
-				out[3] = (pix & 1) ? 255 : 0;                         // A
+				// BGRA+1_5_5_5_REV on LE: A=bit15, R=bits[14:10], G=bits[9:5], B=bits[4:0]
+				out[0] = (uint8_t)(((pix >> 10) & 0x1F) * 255 / 31); // R
+				out[1] = (uint8_t)(((pix >>  5) & 0x1F) * 255 / 31); // G
+				out[2] = (uint8_t)((pix & 0x1F) * 255 / 31);          // B
+				out[3] = (pix & 0x8000) ? 255 : 0;                    // A
 			}
 			uploadFormat = GL_RGBA;
 			uploadType   = GL_UNSIGNED_BYTE;
@@ -536,10 +541,11 @@ void Render_UpdateTexture(
 			for (int p = 0; p < numPixels; p++, in16++, out += 4)
 			{
 				uint16_t pix = *in16;
-				out[0] = (uint8_t)(((pix >>  1) & 0x1F) * 255 / 31);
-				out[1] = (uint8_t)(((pix >>  6) & 0x1F) * 255 / 31);
-				out[2] = (uint8_t)(((pix >> 11) & 0x1F) * 255 / 31);
-				out[3] = (pix & 1) ? 255 : 0;
+				// BGRA+1_5_5_5_REV on LE: A=bit15, R=bits[14:10], G=bits[9:5], B=bits[4:0]
+				out[0] = (uint8_t)(((pix >> 10) & 0x1F) * 255 / 31); // R
+				out[1] = (uint8_t)(((pix >>  5) & 0x1F) * 255 / 31); // G
+				out[2] = (uint8_t)((pix & 0x1F) * 255 / 31);          // B
+				out[3] = (pix & 0x8000) ? 255 : 0;                    // A
 			}
 			uploadFormat = GL_RGBA; uploadType = GL_UNSIGNED_BYTE;
 		}

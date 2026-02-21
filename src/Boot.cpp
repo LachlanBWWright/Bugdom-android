@@ -11,6 +11,7 @@
 
 #ifdef __ANDROID__
 #include <stdlib.h>  // for setenv/getenv
+#include <system_error>  // for std::error_code
 #include "AndroidAssets.h"
 #include "GLESBridge.h"
 #endif
@@ -114,11 +115,26 @@ static void Boot(int argc, char** argv)
 #ifdef __ANDROID__
 	// Ensure HOME env var is set so Pomme can find the preferences folder.
 	// On Android, HOME may not be set, causing FindFolder to fail.
+	// Also pre-create $HOME/.config so DirCreate (called from InitPrefsFolder)
+	// can create the Bugdom subfolder in an existing parent directory.
 	if (!getenv("HOME"))
 	{
 		const char* internalPath = SDL_GetAndroidInternalStoragePath();
 		if (internalPath)
+		{
 			setenv("HOME", internalPath, 1);
+			// Ensure $HOME/.config exists before Pomme::Init registers it as a volume
+			fs::path configDir = fs::path(internalPath) / ".config";
+			std::error_code ec;
+			fs::create_directories(configDir, ec);
+		}
+	}
+	else
+	{
+		// HOME is already set; still make sure .config exists
+		fs::path configDir = fs::path(getenv("HOME")) / ".config";
+		std::error_code ec;
+		fs::create_directories(configDir, ec);
 	}
 #endif
 

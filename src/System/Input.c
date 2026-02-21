@@ -339,7 +339,14 @@ void UpdateKeyMap(void)
 			downNow |= 0 != keystate[kb->key2];
 
 		if (kb->mouseButton)
+#ifndef __ANDROID__
+			// On Android, mouse events are synthesised from touch and would spuriously
+			// trigger kick/jump when the player uses the virtual joystick or buttons.
+			// Touch controls are handled separately through TouchControls_IsButtonDown.
 			downNow |= 0 != (mouseButtons & SDL_BUTTON_MASK(kb->mouseButton));
+#else
+			(void)0; // skip mouse-button bindings on Android
+#endif
 
 		if (gSDLGamepad && kb->gamepadButton != SDL_GAMEPAD_BUTTON_INVALID)
 			downNow |= 0 != SDL_GetGamepadButton(gSDLGamepad, kb->gamepadButton);

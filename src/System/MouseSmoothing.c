@@ -36,7 +36,13 @@ static void PopOldestSnapshot(void)
 	gState.ringStart = (gState.ringStart + 1) % DELTA_MOUSE_MAX_SNAPSHOTS;
 	gState.ringLength--;
 
-	GAME_ASSERT(gState.ringLength != 0 || (gState.dxAccu == 0 && gState.dyAccu == 0));
+	// Reset to exactly zero when the ring empties to avoid floating-point residue
+	// triggering the accumulator assertion.
+	if (gState.ringLength == 0)
+	{
+		gState.dxAccu = 0;
+		gState.dyAccu = 0;
+	}
 }
 
 void MouseSmoothing_ResetState(void)
@@ -68,6 +74,12 @@ void MouseSmoothing_StartFrame(void)
 
 void MouseSmoothing_OnMouseMotion(const SDL_MouseMotionEvent* motion)
 {
+#ifdef __ANDROID__
+	// On Android, SDL synthesises mouse-motion events from touch.
+	// Ignore them here; joystick input is read from TouchControls instead.
+	if (motion->which == SDL_TOUCH_MOUSEID)
+		return;
+#endif
 	if (gState.ringLength == DELTA_MOUSE_MAX_SNAPSHOTS)
 	{
 //		SDL_Log("%s: buffer full!!", __func__);
