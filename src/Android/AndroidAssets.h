@@ -10,10 +10,10 @@
 extern "C" {
 #endif
 
-// Extract all assets under "prefix" into destDir.
-// Returns true on success, false on failure.
-// This should be called once at startup before the game tries to open files.
-bool Android_ExtractAssets(const char *destDir, const char *prefix);
+// Extract all game data files from the APK asset bundle into destDir.
+// Returns true on success, false if any file could not be extracted.
+// Should be called once at startup before the game opens any data files.
+bool Android_ExtractAssets(const char *destDir);
 
 #ifdef __cplusplus
 }
