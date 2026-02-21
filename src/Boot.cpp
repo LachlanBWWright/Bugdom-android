@@ -121,20 +121,21 @@ static void Boot(int argc, char** argv)
 	{
 		const char* internalPath = SDL_GetAndroidInternalStoragePath();
 		if (internalPath)
-		{
 			setenv("HOME", internalPath, 1);
-			// Ensure $HOME/.config exists before Pomme::Init registers it as a volume
-			fs::path configDir = fs::path(internalPath) / ".config";
+	}
+	{
+		// Ensure $HOME/.config exists before Pomme::Init registers it as a volume
+		const char* home = getenv("HOME");
+		if (home)
+		{
+			fs::path configDir = fs::path(home) / ".config";
 			std::error_code ec;
 			fs::create_directories(configDir, ec);
+			if (ec)
+				SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+					"Couldn't create prefs dir '%s': %s",
+					configDir.c_str(), ec.message().c_str());
 		}
-	}
-	else
-	{
-		// HOME is already set; still make sure .config exists
-		fs::path configDir = fs::path(getenv("HOME")) / ".config";
-		std::error_code ec;
-		fs::create_directories(configDir, ec);
 	}
 #endif
 
