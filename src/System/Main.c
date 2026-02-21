@@ -244,7 +244,13 @@ void InitPrefs(void)
 	gGamePrefs.antialiasingLevel	= 0;
 	gGamePrefs.displayNumMinus1		= 0;
 
-	LoadPrefs(&gGamePrefs);							// attempt to read from prefs file		
+	LoadPrefs(&gGamePrefs);							// attempt to read from prefs file
+
+#ifdef __ANDROID__
+	// On Android the full bottom bar wastes screen space on tall phones.
+	// Boss health bars are still rendered independently (see SubmitInfobarOverlay).
+	gGamePrefs.showBottomBar = false;
+#endif
 }
 
 #pragma mark -

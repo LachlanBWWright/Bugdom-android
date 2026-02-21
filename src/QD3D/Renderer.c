@@ -558,9 +558,9 @@ void Render_UpdateTexture(
 			uploadFormat = GL_RGB; uploadType = GL_UNSIGNED_BYTE;
 		}
 
-		if (rowBytesInInput > 0)
+		if (converted && rowBytesInInput > 0)
 		{
-			// Row length was set above; clear it for converted data
+			// Converted buffer is tightly packed; clear row length so GL reads it correctly
 			glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
 		}
 

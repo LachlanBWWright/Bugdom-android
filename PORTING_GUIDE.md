@@ -817,6 +817,163 @@ if (format == GL_BGRA) {
 }
 ```
 
+### 9. `GL_UNPACK_ROW_LENGTH` Must Not Be Reset When No Format Conversion Occurred
+
+GLES 3.0 **does** support `GL_UNPACK_ROW_LENGTH` (it was added in OpenGL ES 3.0). If your
+texture-update code sets this parameter before entering an Android format-conversion block, do
+**not** unconditionally reset it to 0 inside that block. Only reset it when you actually produced a
+tightly-packed converted buffer; otherwise the original row stride is still needed:
+
+```c
+// BAD: always resets row length, even when no conversion was done
+if (rowBytesInInput > 0) {
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);  // ← breaks non-converted uploads!
+}
+glTexSubImage2D(..., pixels);
+
+// GOOD: only reset when we have a tightly-packed converted buffer
+if (converted && rowBytesInInput > 0) {
+    glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
+}
+glTexSubImage2D(..., converted ? converted : pixels);
+```
+
+**Symptom**: "stripe" artifacts on in-game 2D overlays — each row of the texture appears to start
+where the previous row ended (pixel offset = `width`) rather than at the correct stride offset.
+This happens because GL reads `width`-spaced rows instead of `rowBytesInInput`-spaced rows.
+
+### 10. Wide-Screen 2D Overlay Layout
+
+Original games designed for 4:3 (640×480) often include a bottom HUD bar.  On modern 18:9 phones
+the bar wastes screen real-estate and may obscure virtual controls.
+
+**Top overlay**: if you use `glOrtho(0, 640, 480, 0)` with a full-screen viewport, the bar already
+stretches to fill the full screen width.  No geometry change is required; the art is simply scaled.
+
+**Bottom overlay**: remove it on Android and replace with only the level-specific meters (e.g. boss
+health bar) rendered floating over the 3D scene:
+
+```c
+// InitPrefs — after LoadPrefs:
+#ifdef __ANDROID__
+    gGamePrefs.showBottomBar = false;  // no full bottom bar on mobile
+#endif
+
+// SubmitInfobarOverlay — only draw the narrow boss-health mesh when needed:
+if (gGamePrefs.showBottomBar || gBossHealthWasUpdated)
+    Render_SubmitMesh(gInfobarBottomMesh, ...);
+```
+
+`gBossHealthWasUpdated` is set only on boss levels, so the mesh is invisible on normal levels.
+Remove the `paneClip.bottom` reservation when `showBottomBar == false` so the 3D scene fills the
+full screen height.
+
+### 11. Touch Events Synthesise Mouse Clicks
+
+SDL synthesises `SDL_EVENT_MOUSE_BUTTON_DOWN` / `_UP` for every finger touch, with
+`event.button.which == SDL_TOUCH_MOUSEID`.  If your input system maps `SDL_BUTTON_LEFT` to
+in-game actions (attack, kick, etc.), **every tap on the virtual joystick will also fire as a mouse
+click**, triggering unintended actions.
+
+Fix: skip mouse-button game bindings on Android:
+
+```c
+// In UpdateKeyMap / input mapping code:
+#ifndef __ANDROID__
+    // Left mouse button → in-game action
+    if (mouseButtonState & SDL_BUTTON_LMASK)
+        needs |= kNeed_Kick;
+#endif
+```
+
+Alternatively, filter synthetic events explicitly:
+```c
+if (event.button.which == SDL_TOUCH_MOUSEID)
+    return;  // ignore touch-synthesised mouse button
+```
+
+### 12. Mouse-Motion Smoothing Assertion With Touch
+
+If your camera uses a ring-buffer smoother for mouse motion, SDL's touch-synthesised mouse-motion
+events can leave a tiny floating-point residue in the accumulators when the ring empties, tripping
+an assertion such as:
+
+```
+PopOldestSnapshot:39: gState.ringLength != 0 || (dxAccu == 0 && dyAccu == 0)
+```
+
+Two fixes are needed:
+
+1. When `ringLength` reaches 0, force the accumulators to exactly `0.0f` (not rely on
+   subtraction to reach zero):
+
+```c
+if (--gState.ringLength == 0) {
+    gState.dxAccu = 0.0f;   // explicit zero — avoids float residue
+    gState.dyAccu = 0.0f;
+}
+```
+
+2. Filter out synthetic touch mouse-motion events before they enter the buffer:
+
+```c
+// On Android, SDL_TOUCH_MOUSEID events are synthesised from touch; ignore them
+#ifdef __ANDROID__
+if (motion->which == SDL_TOUCH_MOUSEID)
+    return;
+#endif
+```
+
+### 13. Preferences Folder Must Be Created Explicitly on Android
+
+Libraries that write preference files (e.g. Pomme/Quesa) typically resolve the folder via
+`$HOME/.config/<AppName>/`.  On Android:
+
+- `HOME` is not set (see pitfall 6).
+- Even after setting `HOME = SDL_GetAndroidInternalStoragePath()`, the `.config` directory itself
+  does not exist, so `FSpCreate` / `fopen` fail silently, producing errors like:
+
+```
+"Unable to save high scores file"
+```
+
+Fix: create the full preferences directory before initialising the library:
+
+```cpp
+#ifdef __ANDROID__
+{
+    namespace fs = std::filesystem;
+    const char *home = getenv("HOME");
+    if (home) {
+        std::error_code ec;
+        fs::create_directories(std::string(home) + "/.config", ec);
+        if (ec)
+            SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                        "Could not create ~/.config: %s", ec.message().c_str());
+    }
+}
+#endif
+Pomme::Init(...);
+```
+
+### 14. Big-Endian Level / Asset Data
+
+Classic Mac games stored structured data in big-endian (PowerPC) byte order.  Modern Android
+devices are little-endian.  Data loaded with `fread` into C structs will have every multi-byte
+field byte-swapped.
+
+Most source ports (including Bugdom's SDL port) already have byte-swap utilities (`UnpackU32BE`,
+`UnpackU16BE`).  Make sure every struct that is `fread` directly is byte-swapped after load, or
+use explicit `SDL_SwapBE*` calls:
+
+```c
+// Example: swap a 16-bit terrain tile value
+uint16_t tileValue = *(uint16_t *)ptr;
+tileValue = SDL_Swap16(tileValue);  // no-op on big-endian, swaps on little-endian
+```
+
+If you see random garbage in terrain or level objects, byte-swapping is the first thing to check.
+
 ---
 
 ## Testing & Debugging
@@ -897,9 +1054,11 @@ Use this checklist when porting a new game:
 - [ ] **Boot / Startup**
   - [ ] Include `<SDL3/SDL_main.h>` in main translation unit
   - [ ] Set `HOME` env var before initialising preference-aware libraries
+  - [ ] Create `$HOME/.config` directory before initialising Pomme / preference libraries
   - [ ] Wrap boot code in `try/catch` that activates on Android regardless of `_DEBUG`
   - [ ] Extract APK assets to internal storage on first launch (hardcoded file list)
   - [ ] Request GLES 3.0 context before creating window
+  - [ ] Force `showBottomBar = false` on Android after `LoadPrefs`
 
 - [ ] **OpenGL Migration**
   - [ ] Audit all GL calls in the codebase (`grep -rn "gl[A-Z]"`)
@@ -918,6 +1077,7 @@ Use this checklist when porting a new game:
   - [ ] Convert `GL_QUADS` to triangles
   - [ ] Replace client-side arrays with streaming VBOs
   - [ ] Use separate VAOs for different draw modes
+  - [ ] In `glTexSubImage2D` wrapper: only reset `GL_UNPACK_ROW_LENGTH` when converted buffer is tightly packed
 
 - [ ] **Input**
   - [ ] Implement virtual joystick
@@ -925,6 +1085,13 @@ Use this checklist when porting a new game:
   - [ ] Map touch inputs to game controls
   - [ ] Ensure touch controls appear on all screens (menus too)
   - [ ] Test multi-touch (joystick + buttons simultaneously)
+  - [ ] Block `SDL_TOUCH_MOUSEID` mouse-button events from triggering in-game actions
+  - [ ] Filter `SDL_TOUCH_MOUSEID` mouse-motion events from camera smoothing ring buffer
+  - [ ] Reset motion-smoother accumulators to exactly `0.0f` when ring empties
+
+- [ ] **Data / Endianness**
+  - [ ] Audit all `fread`-direct struct loads for big-endian fields
+  - [ ] Use `SDL_SwapBE16` / `SDL_SwapBE32` (or existing `UnpackU16BE` / `UnpackU32BE`)
 
 - [ ] **Testing**
   - [ ] Build for all 4 ABIs (arm64-v8a, armeabi-v7a, x86, x86_64)
@@ -932,6 +1099,7 @@ Use this checklist when porting a new game:
   - [ ] Check LogCat for GL errors
   - [ ] Verify all visual features work (textures, lighting, fog, particles)
   - [ ] Verify touch controls are responsive
+  - [ ] Verify bottom overlay removed; boss health bar visible on boss levels only
   - [ ] Set up CI/CD for automated builds
 
 ---
