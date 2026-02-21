@@ -11,6 +11,9 @@
 /***************/
 
 #include "game.h"
+#ifdef __ANDROID__
+#include "TouchControls.h"
+#endif
 
 
 /**********************/
@@ -220,6 +223,11 @@ void UpdateInput(void)
 {
 	SDL_PumpEvents();
 
+#ifdef __ANDROID__
+	// Push virtual touch-gamepad state into SDL before reading gamepad buttons/axes
+	TouchControls_UpdateVirtualGamepad();
+#endif
+
 		/* CHECK FOR NEW MOUSE BUTTONS */
 
 	if (gEatMouse)
@@ -248,12 +256,19 @@ void UpdateInput(void)
 		ResetInputState();
 
 	// Assume player using key control if any arrow keys are pressed,
-	// otherwise assume mouse movement 
+	// otherwise assume mouse movement.
+	// On Android, always use the gamepad analog path (GetThumbStickVector) for
+	// movement – the virtual left stick sets DPAD buttons for menu navigation,
+	// but we must not let those trigger the discrete keyboard movement path.
+#ifndef __ANDROID__
 	gPlayerUsingKeyControl =
 			   GetKeyState(kKey_Forward)
 			|| GetKeyState(kKey_Backward)
 			|| GetKeyState(kKey_Left)
 			|| GetKeyState(kKey_Right);
+#else
+	gPlayerUsingKeyControl = false;
+#endif
 
 
 		/* UPDATE SWIVEL CAMERA */
@@ -336,7 +351,14 @@ void UpdateKeyMap(void)
 			downNow |= 0 != keystate[kb->key2];
 
 		if (kb->mouseButton)
+#ifndef __ANDROID__
+			// On Android, mouse events are synthesised from touch and would spuriously
+			// trigger kick/jump. Virtual gamepad (set up by TouchControls_Init) handles
+			// all touch input through the normal gamepad code path instead.
 			downNow |= 0 != (mouseButtons & SDL_BUTTON_MASK(kb->mouseButton));
+#else
+			(void)0; // skip mouse-button bindings on Android
+#endif
 
 		if (gSDLGamepad && kb->gamepadButton != SDL_GAMEPAD_BUTTON_INVALID)
 			downNow |= 0 != SDL_GetGamepadButton(gSDLGamepad, kb->gamepadButton);
