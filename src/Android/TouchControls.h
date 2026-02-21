@@ -14,11 +14,13 @@ extern "C" {
 // Button IDs for touch controls
 typedef enum
 {
-    kTouchBtn_Jump     = 0,
-    kTouchBtn_Attack   = 1,
-    kTouchBtn_Kick     = 2,
-    kTouchBtn_Pickup   = 3,
-    kTouchBtn_Pause    = 4,
+    kTouchBtn_Jump     = 0,   // A / South (jump)
+    kTouchBtn_Attack   = 1,   // Y / North (buddy attack)
+    kTouchBtn_Kick     = 2,   // X / West  (kick)
+    kTouchBtn_Pickup   = 3,   // B / East  (morph/pickup)
+    kTouchBtn_Pause    = 4,   // Start     (pause)
+    kTouchBtn_ZoomIn   = 5,   // LB        (zoom in)
+    kTouchBtn_ZoomOut  = 6,   // RB        (zoom out)
     kTouchBtn_COUNT
 } TouchButtonID;
 
@@ -31,12 +33,8 @@ void TouchControls_Shutdown(void);
 // Process an SDL event (call from DoSDLMaintenance for touch events)
 bool TouchControls_ProcessEvent(const SDL_Event *event);
 
-// Query joystick analog values (-1..1)
-float TouchControls_GetJoystickX(void);
-float TouchControls_GetJoystickY(void);
-
-// Query button state
-bool TouchControls_IsButtonDown(TouchButtonID btn);
+// Push current touch state into the SDL virtual gamepad (call once per frame)
+void TouchControls_UpdateVirtualGamepad(void);
 
 // Draw the touch controls overlay (call at end of each frame)
 void TouchControls_Draw(void);

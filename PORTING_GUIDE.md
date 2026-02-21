@@ -974,6 +974,70 @@ tileValue = SDL_Swap16(tileValue);  // no-op on big-endian, swaps on little-endi
 
 If you see random garbage in terrain or level objects, byte-swapping is the first thing to check.
 
+### 15. Use SDL3 Virtual Gamepad for Touch Controls
+
+Mapping touch controls directly to keyboard key-states (via your own `bool isDown[]` array) works
+but gives discrete ("digital") character movement: the character always moves at full speed, with no
+analog ramping. Games designed for gamepads use `SDL_GetGamepadAxis()` which returns a smoothly
+scaled value from -32767 to 32767.
+
+**Better approach**: create an SDL3 *virtual joystick* of type `SDL_JOYSTICK_TYPE_GAMEPAD`, then
+inject touch input into it every frame.  SDL automatically generates a gamepad mapping for it
+(axes 0-5 = LEFTX/LEFTY/RIGHTX/RIGHTY/L_TRIG/R_TRIG; buttons in `SDL_GAMEPAD_BUTTON_*` enum
+order).  Once opened with `SDL_OpenGamepad()`, the virtual device is indistinguishable from a
+physical pad, so all existing gamepad input code works without modification.
+
+```c
+// Initialization (after SDL_Init, before the game loop)
+SDL_VirtualJoystickDesc desc;
+SDL_INIT_INTERFACE(&desc);
+desc.type     = (Uint16)SDL_JOYSTICK_TYPE_GAMEPAD;
+desc.naxes    = (Uint16)SDL_GAMEPAD_AXIS_COUNT;    // 6
+desc.nbuttons = (Uint16)SDL_GAMEPAD_BUTTON_COUNT;  // 25
+desc.name     = "My Game Virtual Controller";
+
+SDL_JoystickID vID  = SDL_AttachVirtualJoystick(&desc);
+SDL_Joystick  *vJoy = SDL_OpenJoystick(vID);
+
+// After attaching, call TryOpenGamepad() so gSDLGamepad points to it
+TryOpenGamepad(false);
+
+// Each frame — push current touch state
+Sint16 lx = (Sint16)(leftStickX  * 32767.0f);
+Sint16 ly = (Sint16)(-leftStickY * 32767.0f);  // game Y-up → SDL Y-down
+SDL_SetJoystickVirtualAxis(vJoy, SDL_GAMEPAD_AXIS_LEFTX,  lx);
+SDL_SetJoystickVirtualAxis(vJoy, SDL_GAMEPAD_AXIS_LEFTY,  ly);
+
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_SOUTH, jumpPressed);
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_WEST,  kickPressed);
+// etc.
+
+// D-pad from stick for menu navigation (threshold ~0.5)
+Sint16 thr = 16384;
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_DPAD_UP,    ly < -thr);
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_DPAD_DOWN,  ly >  thr);
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_DPAD_LEFT,  lx < -thr);
+SDL_SetJoystickVirtualButton(vJoy, SDL_GAMEPAD_BUTTON_DPAD_RIGHT, lx >  thr);
+```
+
+**Important**: if your game sets a `gPlayerUsingKeyControl` flag when directional keys/D-pad buttons
+are pressed, and that flag causes the character to move at constant speed (bypassing the analog
+gamepad path), **force that flag to `false` on Android**.  The D-pad buttons from the stick are
+only needed for menu navigation; in-game movement should always go through `GetThumbStickVector`.
+
+```c
+// In UpdateInput():
+#ifndef __ANDROID__
+    gPlayerUsingKeyControl = GetKeyState(kKey_Forward) || ...;
+#else
+    gPlayerUsingKeyControl = false;  // always use analog gamepad path on Android
+#endif
+```
+
+**For a right-stick camera**: add a second mini joystick to the right side of the screen, the same
+size as the pause button, and inject its analog values into `SDL_GAMEPAD_AXIS_RIGHTX/RIGHTY`.  The
+existing `GetThumbStickVector(true)` / `gCameraControlDelta` code picks it up automatically.
+
 ---
 
 ## Testing & Debugging
@@ -1047,7 +1111,7 @@ Use this checklist when porting a new game:
   - [ ] Create custom `SDLActivity` subclass with `getMainFunction()` → `"SDL_main"`
   - [ ] Update `AndroidManifest.xml` to use custom activity
   - [ ] Create `AndroidManifest.xml`
-  - [ ] Set up launcher icons
+  - [ ] Set up launcher icons (resize game icon to 48/72/96/144/192 px for mipmap-*dpi, reference as `@mipmap/ic_launcher`)
   - [ ] Configure CMakeLists.txt for Android (shared lib, output name `main`, NDK flags)
   - [ ] Set `SDL3_DIR` after `add_subdirectory(SDL3)` for submodule `find_package` calls
 
@@ -1080,11 +1144,15 @@ Use this checklist when porting a new game:
   - [ ] In `glTexSubImage2D` wrapper: only reset `GL_UNPACK_ROW_LENGTH` when converted buffer is tightly packed
 
 - [ ] **Input**
-  - [ ] Implement virtual joystick
-  - [ ] Implement action buttons
-  - [ ] Map touch inputs to game controls
-  - [ ] Ensure touch controls appear on all screens (menus too)
-  - [ ] Test multi-touch (joystick + buttons simultaneously)
+  - [ ] Create SDL3 virtual joystick (`SDL_AttachVirtualJoystick`) of type `SDL_JOYSTICK_TYPE_GAMEPAD`
+  - [ ] Open virtual joystick as gamepad (`SDL_OpenGamepad`); call `TryOpenGamepad(false)` after attach
+  - [ ] Implement left virtual joystick; inject into `SDL_GAMEPAD_AXIS_LEFTX/LEFTY`
+  - [ ] Implement action buttons; inject into `SDL_GAMEPAD_BUTTON_SOUTH/WEST/EAST/NORTH`
+  - [ ] Implement right-stick mini joystick for camera; inject into `SDL_GAMEPAD_AXIS_RIGHTX/RIGHTY`
+  - [ ] Implement shoulder-button presses (+/- zoom) for `SDL_GAMEPAD_BUTTON_LEFT/RIGHT_SHOULDER`
+  - [ ] Push D-pad from left stick (threshold ~0.5) for menu navigation
+  - [ ] Force `gPlayerUsingKeyControl = false` on Android to always use the analog gamepad path
+  - [ ] Draw recognisable vector icons on each button
   - [ ] Block `SDL_TOUCH_MOUSEID` mouse-button events from triggering in-game actions
   - [ ] Filter `SDL_TOUCH_MOUSEID` mouse-motion events from camera smoothing ring buffer
   - [ ] Reset motion-smoother accumulators to exactly `0.0f` when ring empties

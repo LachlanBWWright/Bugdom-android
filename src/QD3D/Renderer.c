@@ -246,6 +246,9 @@ void Render_CreateContext(void)
 #ifdef __ANDROID__
 	GLESBridge_Init();
 	TouchControls_Init();
+	// Pick up the virtual joystick created by TouchControls_Init as the gamepad.
+	// If a physical gamepad is already open this is a no-op.
+	TryOpenGamepad(false);
 #endif
 }
 
