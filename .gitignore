@@ -17,3 +17,4 @@ extern/SDL*
 
 # macOS metadata
 .DS_Store
+_codeql_detected_source_root
