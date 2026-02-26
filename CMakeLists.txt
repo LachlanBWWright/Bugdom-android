@@ -79,8 +79,22 @@ if(NOT DEFINED SDL3_DIR)
 endif()
 
 if(NOT BUILD_SDL_FROM_SOURCE)
-	find_package(SDL3 CONFIG REQUIRED)
-	message("Found pre-built SDL3")
+	if(EMSCRIPTEN)
+		# For Emscripten, SDL3 must be built separately via build_wasm.py
+		# and passed in as -DSDL3_DIR=<install/lib/cmake/SDL3>
+		if(DEFINED SDL3_DIR)
+			find_package(SDL3 CONFIG REQUIRED)
+			message("Emscripten: using pre-built SDL3 from: " ${SDL3_DIR})
+		else()
+			message(FATAL_ERROR
+				"Emscripten build requires SDL3 to be pre-built.\n"
+				"Run: python3 build_wasm.py --dependencies\n"
+				"Then re-run with -DSDL3_DIR=<path/to/sdl3-install/lib/cmake/SDL3>")
+		endif()
+	else()
+		find_package(SDL3 CONFIG REQUIRED)
+		message("Found pre-built SDL3")
+	endif()
 else()
 	if(NOT DEFINED SDL3_DIR)
 		set(SDL3_DIR "${CMAKE_SOURCE_DIR}/extern/SDL")
@@ -95,7 +109,13 @@ endif()
 
 add_subdirectory(extern/Pomme)
 
-find_package(OpenGL REQUIRED)
+if(NOT EMSCRIPTEN)
+	find_package(OpenGL REQUIRED)
+else()
+	# Emscripten provides WebGL, no need for a system OpenGL package
+	# Create a dummy OpenGL::GL target so the rest of the CMakeLists.txt compiles
+	add_library(OpenGL::GL INTERFACE IMPORTED)
+endif()
 
 #------------------------------------------------------------------------------
 # EXECUTABLE TARGET
@@ -276,14 +296,35 @@ set_target_properties(${GAME_TARGET} PROPERTIES
 # POST-BUILD (COPY ASSETS, ETC.)
 #------------------------------------------------------------------------------
 
-if(APPLE)
+if(EMSCRIPTEN)
+	# Emscripten: output .html + .js + .wasm + .data
+	set_target_properties(${GAME_TARGET} PROPERTIES SUFFIX ".html")
+
+	# Link options for Emscripten WebAssembly build
+	target_link_options(${GAME_TARGET} PRIVATE
+		-sASYNCIFY=1
+		-sASYNCIFY_STACK_SIZE=65536
+		-sALLOW_MEMORY_GROWTH=1
+		-sMAXIMUM_MEMORY=512mb
+		-sUSE_WEBGL2=0
+		-sFULL_ES2=1
+		-sEXPORTED_RUNTIME_METHODS=ccall,cwrap
+		-sEXPORTED_FUNCTIONS=_main,_BugdomSetFenceCollision,_BugdomGetFenceCollision,_BugdomGetCurrentLevel,_BugdomSetTerrainOverride
+		"SHELL:--preload-file ${GAME_DATADIR}@/Data"
+		"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/packaging/emscripten_shell.html"
+	)
+
+	# Don't copy data files since they're embedded via --preload-file
+elseif(APPLE)
 	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/../Resources")
 else()
 	set(GAME_DATA_TARGET_LOCATION "$<TARGET_FILE_DIR:${GAME_TARGET}>/Data")
 endif()
 
-add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+if(NOT EMSCRIPTEN)
+	add_custom_command(TARGET ${GAME_TARGET} POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E copy_directory "${GAME_DATADIR}" "${GAME_DATA_TARGET_LOCATION}")
+endif()
 
 if(APPLE)
 	set(INFO_PLIST "${GAME_DATA_TARGET_LOCATION}/../Info.plist")

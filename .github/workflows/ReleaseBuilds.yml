@@ -1,6 +1,12 @@
 name: Make Release Builds
 
-on: [workflow_dispatch]
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build-linux-appimage:
@@ -86,3 +92,42 @@ jobs:
           name: ${{env.ARTIFACT_NAME}}
           path: dist/
           compression-level: 0
+
+  publish-release:
+    needs: [build-linux-appimage, build-windows]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import re
+          with open('src/Headers/version.h') as f:
+              for line in f:
+                  m = re.match(r'#define GAME_VERSION\s+\"(.+)\"', line)
+                  if m:
+                      print(m.group(1))
+                      break
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist-all/
+          merge-multiple: true
+
+      - name: Create or update latest release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "Bugdom ${{ steps.version.outputs.version }} (latest)"
+          body: |
+            Automatically built from the `main` branch.
+          files: dist-all/*
+          prerelease: false
+          make_latest: true
+

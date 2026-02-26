@@ -1,0 +1,153 @@
+name: WebAssembly Build and Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  build-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with: {submodules: 'recursive'}
+
+      - name: Setup Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: 'emsdk-cache'
+
+      - name: Cache SDL3 build
+        id: cache-sdl3-wasm
+        uses: actions/cache@v4
+        with:
+          path: |
+            extern/SDL3-3.2.8/install-wasm
+            /tmp/pangea-games-build-cache/SDL3-3.2.8.tar.gz
+          key: sdl3-wasm-3.2.8-${{ runner.os }}
+
+      - name: Build SDL3 and configure for Emscripten
+        run: python3 build_wasm.py --dependencies --configure
+
+      - name: Build WebAssembly
+        run: python3 build_wasm.py --build
+
+      - name: Package
+        run: python3 build_wasm.py --package
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Bugdom-wasm
+          path: dist-wasm/
+          compression-level: 0
+
+      - name: Prepare GitHub Pages content
+        run: |
+          mkdir -p gh-pages
+          # Copy WASM game files
+          cp dist-wasm/Bugdom.html gh-pages/game.html
+          cp dist-wasm/Bugdom.js   gh-pages/
+          cp dist-wasm/Bugdom.wasm gh-pages/
+          cp dist-wasm/Bugdom.data gh-pages/
+          # Copy the main GitHub Pages index from docs/
+          cp docs/index.html gh-pages/index.html
+          # Add _headers file for COOP/COEP (required if threads are ever enabled)
+          cat > gh-pages/_headers <<'HEADERS'
+          /*
+            Cross-Origin-Embedder-Policy: require-corp
+            Cross-Origin-Opener-Policy: same-origin
+          HEADERS
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gh-pages/
+
+  deploy-pages:
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
+
+  release-wasm:
+    needs: build-wasm
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download WASM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: Bugdom-wasm
+          path: dist-wasm/
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(python3 -c "
+          import re
+          with open('src/Headers/version.h') as f:
+              for line in f:
+                  m = re.match(r'#define GAME_VERSION\s+\"(.+)\"', line)
+                  if m:
+                      print(m.group(1))
+                      break
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Create or update WebAssembly release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: wasm-latest
+          name: "Bugdom WebAssembly (latest)"
+          body: |
+            ## Bugdom WebAssembly Build
+
+            This release contains the latest WebAssembly build of Bugdom, automatically built from the `main` branch.
+
+            **Play online:** See the [GitHub Pages site](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/)
+
+            ### Files
+            - `Bugdom-${{ steps.version.outputs.version }}-wasm.zip` — WebAssembly bundle (HTML + JS + WASM + data)
+
+            ### Level Editor Integration
+            Use URL query parameters to jump directly to a level:
+            - `?level=N` — start at level N (0=Training, 1=Lawn, … 9=Ant King)
+            - `?terrainFile=:Terrain:Custom.ter` — override terrain file
+            - `?noFenceCollision=1` — disable fence collisions
+            - `?dev` — show developer tools panel
+
+            ### JavaScript API (Cheat Interface)
+            ```javascript
+            // Fence collision toggle
+            Module.ccall('BugdomSetFenceCollision', null, ['number'], [0]); // disable
+            Module.ccall('BugdomSetFenceCollision', null, ['number'], [1]); // enable
+            Module.ccall('BugdomGetFenceCollision', 'number', [], []);      // query
+
+            // Get current level
+            Module.ccall('BugdomGetCurrentLevel', 'number', [], []);
+
+            // Override terrain for next level load
+            Module.ccall('BugdomSetTerrainOverride', null, ['string'], [':Terrain:Custom.ter']);
+            ```
+          files: dist-wasm/Bugdom-*-wasm.zip
+          prerelease: false
+          make_latest: false
