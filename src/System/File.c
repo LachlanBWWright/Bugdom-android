@@ -1183,7 +1183,7 @@ Boolean	hasTerrainOverride = (gLevelTerrainOverride[0] != '\0');
 	if (hasTerrainOverride)
 	{
 		FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, gLevelTerrainOverride, &terrainSpec);
-		gLevelTerrainOverride[0] = '\0';	// consume the override
+		gLevelTerrainOverride[0] = '\0';	// consume override: terrainSpec is already set from it
 	}
 		
 	switch(gLevelType)

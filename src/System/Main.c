@@ -738,6 +738,9 @@ static void CheckForCheats(void)
 		if (GetKeyState_SDL(SDL_SCANCODE_F7))		// hurt player
 			PlayerGotHurt(NULL, 1/60.0f, 1.0f, false, true, 1/60.0f);
 
+		if (GetNewKeyState_SDL(SDL_SCANCODE_F9))	// toggle fence collision
+			gNoFenceCollision = !gNoFenceCollision;
+
 	}
 }
 

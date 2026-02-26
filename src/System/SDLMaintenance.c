@@ -33,7 +33,7 @@ static void UpdateDebugStats(void)
 
 		SDL_snprintf(
 				gDebugTextBuffer, sizeof(gDebugTextBuffer),
-				"fps: %d\ntris: %d\nmeshes: %d+%d\ntiles: %ld/%ld%s\nnodes: %d\nheap: %dK, %dp\n\nx: %d\nz: %d\ny: %.3f %s%s\n%s\n%s\n\n\n\n\n\n\n\n\n"
+				"fps: %d\ntris: %d\nmeshes: %d+%d\ntiles: %ld/%ld%s\nnodes: %d\nheap: %dK, %dp\n\nx: %d\nz: %d\ny: %.3f %s%s\n%s\n%s\n%s\n\n\n\n\n\n\n\n\n"
 				"Bugdom %s - SDL %s\nOpenGL %s, %s @ %dx%d",
 				(int)roundf(fps),
 				gRenderStats.triangles,
@@ -52,6 +52,7 @@ static void UpdateDebugStats(void)
 				(gPlayerObj && gPlayerObj->MPlatform)? "M" : "",
 				debugModeName,
 				gLiquidCheat ? "Liquid cheat ON" : "",
+				gNoFenceCollision ? "No fence collision" : "",
 				GAME_VERSION,
 				SDL_GetRevision(),
 				glGetString(GL_VERSION),
@@ -136,6 +137,9 @@ void DoSDLMaintenance(void)
 		gDebugTextLastUpdatedAt = 0;
 		QD3D_UpdateDebugTextMesh(NULL);
 
+#ifndef __EMSCRIPTEN__
+		// glPolygonMode is not available in WebGL
 		glPolygonMode(GL_FRONT_AND_BACK, gDebugMode == DEBUG_MODE_WIREFRAME? GL_LINE: GL_FILL);
+#endif
 	}
 }
