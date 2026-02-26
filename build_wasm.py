@@ -151,18 +151,17 @@ if args.dependencies:
 if args.configure:
     log("*** Configuring Bugdom for Emscripten ***")
 
-    sdl3_cmake_dir = os.path.join(sdl_install_dir, "lib", "cmake", "SDL3")
-    if not os.path.exists(sdl3_cmake_dir):
-        # Try alternate paths
-        for candidate in [
-            os.path.join(sdl_install_dir, "lib", "cmake", "SDL3"),
-            os.path.join(sdl_install_dir, "share", "cmake", "SDL3"),
-        ]:
-            if os.path.exists(candidate):
-                sdl3_cmake_dir = candidate
-                break
-        else:
-            die(f"Couldn't find SDL3 CMake config in {sdl_install_dir}. Run --dependencies first.")
+    # Locate SDL3 CMake config directory
+    sdl3_cmake_dir = None
+    for candidate in [
+        os.path.join(sdl_install_dir, "lib", "cmake", "SDL3"),
+        os.path.join(sdl_install_dir, "share", "cmake", "SDL3"),
+    ]:
+        if os.path.exists(candidate):
+            sdl3_cmake_dir = candidate
+            break
+    if not sdl3_cmake_dir:
+        die(f"Couldn't find SDL3 CMake config in {sdl_install_dir}. Run --dependencies first.")
 
     if os.path.exists(build_dir):
         shutil.rmtree(build_dir)

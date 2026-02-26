@@ -63,12 +63,8 @@ jobs:
           cp dist-wasm/Bugdom.data gh-pages/
           # Copy the main GitHub Pages index from docs/
           cp docs/index.html gh-pages/index.html
-          # Add _headers file for COOP/COEP (required if threads are ever enabled)
-          cat > gh-pages/_headers <<'HEADERS'
-          /*
-            Cross-Origin-Embedder-Policy: require-corp
-            Cross-Origin-Opener-Policy: same-origin
-          HEADERS
+          # Copy screenshot if present
+          if [ -f docs/screenshot.webp ]; then cp docs/screenshot.webp gh-pages/; fi
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
