@@ -141,10 +141,10 @@ static void Boot(int argc, char** argv)
 	// On Emscripten, also check URL query parameters for level editor options.
 	// These are made available via JavaScript as window.BUGDOM_START_LEVEL etc.
 	int jsStartLevel = EM_ASM_INT({
-		if (typeof window !== 'undefined' && typeof window.BUGDOM_START_LEVEL === 'number')
+		if (typeof window !== "undefined" && typeof window.BUGDOM_START_LEVEL === "number")
 			return window.BUGDOM_START_LEVEL;
 		var params = new URLSearchParams(window.location.search);
-		var l = params.get('level');
+		var l = params.get("level");
 		return l !== null ? parseInt(l) : -1;
 	});
 	if (jsStartLevel >= 0)
@@ -152,12 +152,12 @@ static void Boot(int argc, char** argv)
 
 	char jsTerrainOverride[512] = {'\0'};
 	EM_ASM({
-		var path = '';
-		if (typeof window !== 'undefined' && typeof window.BUGDOM_TERRAIN_FILE === 'string')
+		var path = "";
+		if (typeof window !== "undefined" && typeof window.BUGDOM_TERRAIN_FILE === "string")
 			path = window.BUGDOM_TERRAIN_FILE;
 		else {
 			var params = new URLSearchParams(window.location.search);
-			var t = params.get('terrainFile');
+			var t = params.get("terrainFile");
 			if (t) path = t;
 		}
 		if (path) stringToUTF8(path, $0, 512);
@@ -166,10 +166,10 @@ static void Boot(int argc, char** argv)
 		SDL_snprintf(gLevelTerrainOverride, sizeof(gLevelTerrainOverride), "%s", jsTerrainOverride);
 
 	int jsNoFence = EM_ASM_INT({
-		if (typeof window !== 'undefined' && window.BUGDOM_NO_FENCE_COLLISION)
+		if (typeof window !== "undefined" && window.BUGDOM_NO_FENCE_COLLISION)
 			return 1;
 		var params = new URLSearchParams(window.location.search);
-		return params.get('noFenceCollision') ? 1 : 0;
+		return params.get("noFenceCollision") ? 1 : 0;
 	});
 	if (jsNoFence)
 		gNoFenceCollision = true;

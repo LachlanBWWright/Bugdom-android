@@ -169,6 +169,8 @@ const RenderModifiers kDefaultRenderMods_Pillarbox =
 /****************************/
 
 static const char* kVertexShaderSource =
+"precision mediump float;\n"
+"precision mediump int;\n"
 "attribute vec3 a_Position;\n"
 "attribute vec3 a_Normal;\n"
 "attribute vec2 a_TexCoord;\n"
@@ -215,6 +217,7 @@ static const char* kVertexShaderSource =
 
 static const char* kFragmentShaderSource =
 "precision mediump float;\n"
+"precision mediump int;\n"
 "uniform sampler2D u_Texture0;\n"
 "uniform int u_TextureEnabled;\n"
 "uniform int u_AlphaTestEnabled;\n"
@@ -361,8 +364,9 @@ glUniform4f(gState.loc_u_AmbientColor, 1, 1, 1, 1);
 
 static void UploadMatrix4x4(GLint loc, const TQ3Matrix4x4* m)
 {
-// TQ3Matrix4x4 is row-major; OpenGL wants column-major, so transpose.
-glUniformMatrix4fv(loc, 1, GL_TRUE, (const float*) m->value);
+// TQ3Matrix4x4 is column-major (value[col][row]), which matches OpenGL's expected layout.
+// WebGL 1 requires transpose=GL_FALSE.
+glUniformMatrix4fv(loc, 1, GL_FALSE, (const float*) m->value);
 }
 
 static void UploadMatrix3x3NormalFromMV(const TQ3Matrix4x4* mv)

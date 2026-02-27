@@ -897,6 +897,10 @@ void MakeObjectTransparent(ObjNode *theNode, float transPercent)
 
 void DrawCollisionBoxes(const ObjNode* theNode)
 {
+#ifdef __EMSCRIPTEN__
+	// glBegin/glEnd not available in WebGL; skip debug collision box drawing.
+	(void)theNode;
+#else
 int	n,i;
 CollisionBoxType	*c;
 float			left,right,top,bottom,front,back;
@@ -949,4 +953,5 @@ float			left,right,top,bottom,front,back;
 		glVertex3f(right,		bottom,		front);
 		glEnd();
 	}
+#endif
 }

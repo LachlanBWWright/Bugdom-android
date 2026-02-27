@@ -2,7 +2,6 @@ name: WebAssembly Build and Deploy
 
 on:
   push:
-    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,8 +10,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: "pages"
-  cancel-in-progress: false
+  group: "pages-${{ github.ref }}"
+  cancel-in-progress: true
 
 jobs:
   build-wasm:
@@ -46,6 +45,15 @@ jobs:
       - name: Package
         run: python3 build_wasm.py --package
 
+      - name: Browser test (Playwright)
+        run: |
+          pip3 install playwright
+          python3 -m playwright install chromium
+          # Serve the dist-wasm directory over HTTP
+          python3 -m http.server 8888 --directory dist-wasm &
+          sleep 3
+          python3 test_wasm_browser.py --url http://localhost:8888/Bugdom.html
+
       - name: Upload WASM artifact
         uses: actions/upload-artifact@v4
         with:
@@ -74,6 +82,7 @@ jobs:
   deploy-pages:
     needs: build-wasm
     runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

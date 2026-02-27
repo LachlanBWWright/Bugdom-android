@@ -301,16 +301,13 @@ if(EMSCRIPTEN)
 	set_target_properties(${GAME_TARGET} PROPERTIES SUFFIX ".html")
 
 	# Link options for Emscripten WebAssembly build
+	# Uses modern OpenGL ES 2.0 / WebGL (no legacy emulation required)
 	target_link_options(${GAME_TARGET} PRIVATE
 		-sASYNCIFY=1
 		-sASYNCIFY_STACK_SIZE=65536
 		-sALLOW_MEMORY_GROWTH=1
 		-sMAXIMUM_MEMORY=512MB
-		# Legacy OpenGL emulation: required because the game uses OpenGL 1.x
-		# features (glBegin/glEnd, fixed-function pipeline, glFog, etc.) that
-		# do not exist in WebGL. Emscripten emulates them on top of WebGL.
-		-sLEGACY_GL_EMULATION=1
-		-sGL_UNSAFE_OPTS=0
+		-sFULL_ES2=1
 		-sEXPORTED_RUNTIME_METHODS=ccall,cwrap
 		-sEXPORTED_FUNCTIONS=_main,_BugdomSetFenceCollision,_BugdomGetFenceCollision,_BugdomGetCurrentLevel,_BugdomSetTerrainOverride
 		"SHELL:--preload-file ${GAME_DATADIR}@/Data"

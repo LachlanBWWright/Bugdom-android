@@ -11,7 +11,11 @@
 /****************************/
 
 #include "game.h"
+#ifdef __EMSCRIPTEN__
+#include <GLES2/gl2.h>
+#else
 #include <SDL3/SDL_opengl.h>
+#endif
 
 
 /****************************/
@@ -213,59 +217,12 @@ QD3DSetupOutputType	*data;
 
 static void CreateLights(QD3DLightDefType *lightDefPtr)
 {
-			/************************/
-			/* CREATE AMBIENT LIGHT */
-			/************************/
-
-	if (lightDefPtr->ambientBrightness != 0)						// see if ambient exists
-	{
-		GLfloat ambient[4] =
-		{
-			lightDefPtr->ambientBrightness * lightDefPtr->ambientColor.r,
-			lightDefPtr->ambientBrightness * lightDefPtr->ambientColor.g,
-			lightDefPtr->ambientBrightness * lightDefPtr->ambientColor.b,
-			1
-		};
-		glLightModelfv(GL_LIGHT_MODEL_AMBIENT, ambient);
-	}
-
-			/**********************/
-			/* CREATE FILL LIGHTS */
-			/**********************/
-
-	for (int i = 0; i < lightDefPtr->numFillLights; i++)
-	{
-		static GLfloat lightamb[4] = { 0.0, 0.0, 0.0, 1.0 };
-		GLfloat lightVec[4];
-		GLfloat	diffuse[4];
-
-					/* SET FILL DIRECTION */
-
-		Q3Vector3D_Normalize(&lightDefPtr->fillDirection[i], &lightDefPtr->fillDirection[i]);
-		lightVec[0] = -lightDefPtr->fillDirection[i].x;		// negate vector because OGL is stupid
-		lightVec[1] = -lightDefPtr->fillDirection[i].y;
-		lightVec[2] = -lightDefPtr->fillDirection[i].z;
-		lightVec[3] = 0;									// when w==0, this is a directional light, if 1 then point light
-		glLightfv(GL_LIGHT0+i, GL_POSITION, lightVec);
-
-					/* SET COLOR */
-
-		glLightfv(GL_LIGHT0+i, GL_AMBIENT, lightamb);
-
-		diffuse[0] = lightDefPtr->fillColor[i].r * lightDefPtr->fillBrightness[i];
-		diffuse[1] = lightDefPtr->fillColor[i].g * lightDefPtr->fillBrightness[i];
-		diffuse[2] = lightDefPtr->fillColor[i].b * lightDefPtr->fillBrightness[i];
-		diffuse[3] = 1;
-
-		glLightfv(GL_LIGHT0+i, GL_DIFFUSE, diffuse);
-
-		glEnable(GL_LIGHT0+i);								// enable the light
-	}
-
-	for (int i = lightDefPtr->numFillLights; i < MAX_FILL_LIGHTS; i++)
-	{
-		glDisable(GL_LIGHT0 + i);
-	}
+	// Lights are now set up via shader uniforms.
+	// Initial setup uses identity view matrix (lights will be updated per-frame in CalcCameraMatrixInfo).
+	TQ3Matrix4x4 identity;
+	SDL_memset(&identity, 0, sizeof(identity));
+	identity.value[0][0] = identity.value[1][1] = identity.value[2][2] = identity.value[3][3] = 1.0f;
+	Render_SetLights(lightDefPtr, &identity);
 }
 
 
@@ -598,10 +555,10 @@ void ShowNormal(TQ3Point3D *where, TQ3Vector3D *normal)
 
 void DrawNormal(void)
 {
-	glBegin(GL_LINES);
-	glVertex3f(gNormalWhere.x, gNormalWhere.y, gNormalWhere.z);
-	glVertex3f(gNormalWhere.x + gNormal.x * 400.0f, gNormalWhere.y + gNormal.y * 400.0f, gNormalWhere.z + gNormal.z * 400.0f);
-	glEnd();
+#ifndef __EMSCRIPTEN__
+	// glBegin/glEnd are not available in WebGL; this debug function is skipped.
+	(void)0; // placeholder to avoid empty body warning
+#endif
 }
 
 /************ LAY OUT TEXT IN DEBUG TEXT MESH *****************/
