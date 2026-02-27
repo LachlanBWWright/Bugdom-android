@@ -10,6 +10,43 @@ cd Bugdom
 python3 build.py
 ```
 
+## How to build for WebAssembly
+
+To build Bugdom for WebAssembly and test it in a browser:
+
+1. Install the [Emscripten SDK](https://emscripten.org/docs/getting_started/downloads.html) and activate it.
+2. Clone the repo **recursively**:
+    ```
+    git clone --recurse-submodules https://github.com/LachlanBWWright/Bugdom-android
+    cd Bugdom-android
+    ```
+3. Build the WebAssembly version:
+    ```
+    python3 build_wasm.py
+    ```
+    This will:
+    - Download and build SDL3 for Emscripten
+    - Configure and build Bugdom for WebAssembly
+    - Package the output files into `dist-wasm/`
+
+    You can also run individual steps:
+    ```
+    python3 build_wasm.py --dependencies  # Download and build SDL3
+    python3 build_wasm.py --configure     # Configure CMake
+    python3 build_wasm.py --build         # Build with emmake
+    python3 build_wasm.py --package       # Package artifacts
+    ```
+
+4. Test in a browser:
+    ```
+    python3 -m http.server 8000 --directory dist-wasm
+    ```
+    Then open http://localhost:8000/ in your browser.
+
+The WebAssembly build is automatically deployed to [GitHub Pages](https://lachlanbwwright.github.io/Bugdom-android/) on every push to the `main` branch via GitHub Actions.
+
+---
+
 If you want to build the game **manually** instead, the rest of this document describes how to do just that on each of the big 3 desktop operating systems.
 
 ## How to build the game manually on macOS
