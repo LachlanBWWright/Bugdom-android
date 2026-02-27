@@ -9,6 +9,10 @@
 #include "PommeInit.h"
 #include "PommeFiles.h"
 
+#ifdef __EMSCRIPTEN__
+#include <emscripten.h>
+#endif
+
 extern "C"
 {
 	#include "game.h"
@@ -21,6 +25,36 @@ extern "C"
 	// Tell Windows graphics driver that we prefer running on a dedicated GPU if available
 	__declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
 	__declspec(dllexport) unsigned long NvOptimusEnablement = 1;
+#endif
+
+#ifdef __EMSCRIPTEN__
+	// Functions exported to JavaScript for level editor / cheat interface
+	EMSCRIPTEN_KEEPALIVE
+	void BugdomSetFenceCollision(int enabled)
+	{
+		gNoFenceCollision = !enabled;
+	}
+
+	EMSCRIPTEN_KEEPALIVE
+	int BugdomGetFenceCollision(void)
+	{
+		return !gNoFenceCollision;
+	}
+
+	EMSCRIPTEN_KEEPALIVE
+	int BugdomGetCurrentLevel(void)
+	{
+		return (int)gRealLevel;
+	}
+
+	EMSCRIPTEN_KEEPALIVE
+	void BugdomSetTerrainOverride(const char* colonPath)
+	{
+		if (colonPath && colonPath[0] != '\0')
+			SDL_snprintf(gLevelTerrainOverride, sizeof(gLevelTerrainOverride), "%s", colonPath);
+		else
+			gLevelTerrainOverride[0] = '\0';
+	}
 #endif
 }
 
@@ -86,6 +120,61 @@ static void Boot(int argc, char** argv)
 	SDL_SetLogPriorities(SDL_LOG_PRIORITY_INFO);
 #endif
 
+	// Parse command-line arguments for level editor / developer options
+	for (int i = 1; i < argc; i++)
+	{
+		if (SDL_strcmp(argv[i], "--level") == 0 && i + 1 < argc)
+		{
+			gStartLevel = SDL_atoi(argv[++i]);
+		}
+		else if (SDL_strcmp(argv[i], "--terrain-file") == 0 && i + 1 < argc)
+		{
+			SDL_snprintf(gLevelTerrainOverride, sizeof(gLevelTerrainOverride), "%s", argv[++i]);
+		}
+		else if (SDL_strcmp(argv[i], "--no-fence-collision") == 0)
+		{
+			gNoFenceCollision = true;
+		}
+	}
+
+#ifdef __EMSCRIPTEN__
+	// On Emscripten, also check URL query parameters for level editor options.
+	// These are made available via JavaScript as window.BUGDOM_START_LEVEL etc.
+	int jsStartLevel = EM_ASM_INT({
+		if (typeof window !== "undefined" && typeof window.BUGDOM_START_LEVEL === "number")
+			return window.BUGDOM_START_LEVEL;
+		var params = new URLSearchParams(window.location.search);
+		var l = params.get("level");
+		return l !== null ? parseInt(l) : -1;
+	});
+	if (jsStartLevel >= 0)
+		gStartLevel = jsStartLevel;
+
+	char jsTerrainOverride[512] = {'\0'};
+	EM_ASM({
+		var path = "";
+		if (typeof window !== "undefined" && typeof window.BUGDOM_TERRAIN_FILE === "string")
+			path = window.BUGDOM_TERRAIN_FILE;
+		else {
+			var params = new URLSearchParams(window.location.search);
+			var t = params.get("terrainFile");
+			if (t) path = t;
+		}
+		if (path) stringToUTF8(path, $0, 512);
+	}, jsTerrainOverride);
+	if (jsTerrainOverride[0] != '\0')
+		SDL_snprintf(gLevelTerrainOverride, sizeof(gLevelTerrainOverride), "%s", jsTerrainOverride);
+
+	int jsNoFence = EM_ASM_INT({
+		if (typeof window !== "undefined" && window.BUGDOM_NO_FENCE_COLLISION)
+			return 1;
+		var params = new URLSearchParams(window.location.search);
+		return params.get("noFenceCollision") ? 1 : 0;
+	});
+	if (jsNoFence)
+		gNoFenceCollision = true;
+#endif
+
 	// Start our "machine"
 	Pomme::Init();
 
@@ -100,9 +189,16 @@ retryVideo:
 	}
 
 	// Create window
+#ifdef __EMSCRIPTEN__
+	// Emscripten uses WebGL, request an OpenGL ES2 context
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_ES);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#else
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 0);
+#endif
 
 	gCurrentAntialiasingLevel = gGamePrefs.antialiasingLevel;
 	if (gCurrentAntialiasingLevel != 0)
@@ -131,6 +227,11 @@ retryVideo:
 		SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE | SDL_WINDOW_HIGH_PIXEL_DENSITY);
 
 	MoveToPreferredDisplay();
+
+#ifdef __EMSCRIPTEN__
+	// Sync with requestAnimationFrame on Emscripten for smooth rendering
+	SDL_GL_SetSwapInterval(1);
+#endif
 
 	if (!gSDLWindow)
 	{

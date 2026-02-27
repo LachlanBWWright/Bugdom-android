@@ -75,6 +75,7 @@ extern	Boolean						gIsInGame;
 extern	Boolean						gIsGamePaused;
 extern	Boolean						gLiquidCheat;
 extern	Boolean						gMuteMusicFlag;
+extern	Boolean						gNoFenceCollision;
 extern	Boolean						gPlayerCanMove;
 extern	Boolean						gPlayerGotKilledFlag;
 extern	Boolean						gPlayerKnockOnButt;
@@ -169,6 +170,7 @@ extern	int							gCurrentAntialiasingLevel;
 extern	int							gDebugMode;
 extern	int							gMaxItemsAllocatedInAPass;
 extern	int							gNumObjNodes;
+extern	int							gStartLevel;
 extern	int							gWindowHeight;
 extern	int							gWindowWidth;
 extern	int 						gCurrentSaveSlot;
@@ -218,6 +220,7 @@ extern	u_short						gLevelType;
 extern	u_short						gLevelTypeMask;
 extern	u_short						gRealLevel;
 extern	unsigned long 				gScore;
+extern	char						gLevelTerrainOverride[512];
 
 #ifdef __cplusplus
 };

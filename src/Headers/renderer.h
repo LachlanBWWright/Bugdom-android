@@ -80,6 +80,14 @@ void DoFatalGLError(GLenum error, const char* function, int line);
 
 #pragma mark -
 
+// Must be declared here to avoid circular include with qd3d_support.h
+#include "qd3d_support.h"
+void Render_SetProjectionMatrix(const TQ3Matrix4x4* m);
+void Render_SetModelViewMatrix(const TQ3Matrix4x4* m);
+void Render_SetLights(const QD3DLightDefType* lights, const TQ3Matrix4x4* viewMatrix);
+
+#pragma mark -
+
 void Render_CreateContext(void);
 
 void Render_DeleteContext(void);

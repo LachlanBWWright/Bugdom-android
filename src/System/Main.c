@@ -67,6 +67,10 @@ u_short		gLevelTypeMask = 0;
 
 int			gDebugMode = DEBUG_MODE_OFF;
 Boolean		gLiquidCheat = false;
+
+/* Level editor / developer start options */
+int			gStartLevel = -1;			// >=0: skip menus and jump to this level
+Boolean		gNoFenceCollision = false;	// if true, skip fence collision detection
 Boolean		gUseCyclorama;
 float		gCurrentYon;
 
@@ -734,6 +738,9 @@ static void CheckForCheats(void)
 		if (GetKeyState_SDL(SDL_SCANCODE_F7))		// hurt player
 			PlayerGotHurt(NULL, 1/60.0f, 1.0f, false, true, 1/60.0f);
 
+		if (GetNewKeyState_SDL(SDL_SCANCODE_F9))	// toggle fence collision
+			gNoFenceCollision = !gNoFenceCollision;
+
 	}
 }
 
@@ -834,10 +841,21 @@ unsigned long	someLong;
 
 	Pomme_FlushPtrTracking(false);
 
-	DoLegalScreen();
-
 	SDL_HideCursor();
 	WarpMouseToCenter();							// prime cursor position
+
+		/* IF DIRECT LEVEL SPECIFIED, SKIP ALL MENUS AND JUMP TO LEVEL */
+
+	if (gStartLevel >= 0 && gStartLevel < NUM_LEVELS)
+	{
+		InitInventoryForGame();
+		gRealLevel = (u_short)gStartLevel;
+		gRestoringSavedGame = true;
+		PlayGame();
+		return(0);
+	}
+
+	DoLegalScreen();
 
 	CheckDebugShortcutKeysOnBoot();
 	DoPangeaLogo();

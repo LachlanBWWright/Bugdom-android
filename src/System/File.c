@@ -84,6 +84,10 @@ float	g3DTileSize, g3DMinY, g3DMaxY;
 
 int		gCurrentSaveSlot = -1;
 
+/* Level terrain override: colon-path relative to gDataSpec, e.g. ":Terrain:Custom.ter"
+ * Consumed (cleared) on first use by LoadLevelArt. */
+char	gLevelTerrainOverride[512] = {'\0'};
+
 /******************* LOAD SKELETON *******************/
 //
 // Loads a skeleton file & creates storage for it.
@@ -1155,6 +1159,8 @@ short					**xlateTableHand,*xlateTbl;
 void LoadLevelArt(void)
 {
 FSSpec	spec;
+FSSpec	terrainSpec;
+Boolean	hasTerrainOverride = (gLevelTerrainOverride[0] != '\0');
 
 			/* LOAD GLOBAL STUFF */
 
@@ -1172,7 +1178,14 @@ FSSpec	spec;
 			/*****************************/
 			/* LOAD LEVEL SPECIFIC STUFF */
 			/*****************************/
-			
+
+		/* Apply terrain override from level editor if provided */
+	if (hasTerrainOverride)
+	{
+		FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, gLevelTerrainOverride, &terrainSpec);
+		gLevelTerrainOverride[0] = '\0';	// consume override: terrainSpec is already set from it
+	}
+		
 	switch(gLevelType)
 	{
 				/***********************/
@@ -1180,12 +1193,15 @@ FSSpec	spec;
 				/***********************/
 				
 		case	LEVEL_TYPE_LAWN:
-				if (gAreaNum == 0)
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Training.ter", &spec);
-				else
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Lawn.ter", &spec);
+				if (!hasTerrainOverride)
+				{
+					if (gAreaNum == 0)
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Training.ter", &terrainSpec);
+					else
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Lawn.ter", &terrainSpec);
+				}
 				
-				LoadPlayfield(&spec);
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						
@@ -1212,8 +1228,9 @@ FSSpec	spec;
 				/*****************/
 				
 		case	LEVEL_TYPE_POND:
-				FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Pond.ter", &spec);
-				LoadPlayfield(&spec);
+				if (!hasTerrainOverride)
+					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Pond.ter", &terrainSpec);
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						
@@ -1241,11 +1258,14 @@ FSSpec	spec;
 				/*******************/
 				
 		case	LEVEL_TYPE_FOREST:
-				if (gAreaNum == 0)
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Beach.ter", &spec);
-				else
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Flight.ter", &spec);
-				LoadPlayfield(&spec);
+				if (!hasTerrainOverride)
+				{
+					if (gAreaNum == 0)
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Beach.ter", &terrainSpec);
+					else
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Flight.ter", &terrainSpec);
+				}
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						
@@ -1276,11 +1296,14 @@ FSSpec	spec;
 				
 		case	LEVEL_TYPE_HIVE:
 			
-				if (gAreaNum == 0)
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:BeeHive.ter", &spec);
-				else
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:QueenBee.ter", &spec);
-				LoadPlayfield(&spec);
+				if (!hasTerrainOverride)
+				{
+					if (gAreaNum == 0)
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:BeeHive.ter", &terrainSpec);
+					else
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:QueenBee.ter", &terrainSpec);
+				}
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						
@@ -1308,8 +1331,9 @@ FSSpec	spec;
 				/*******************/
 				
 		case	LEVEL_TYPE_NIGHT:
-				FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Night.ter", &spec);
-				LoadPlayfield(&spec);
+				if (!hasTerrainOverride)
+					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:Night.ter", &terrainSpec);
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						
@@ -1338,11 +1362,14 @@ FSSpec	spec;
 				/*************************/
 				
 		case	LEVEL_TYPE_ANTHILL:
-				if (gAreaNum == 0)
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:AntHill.ter", &spec);
-				else
-					FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:AntKing.ter", &spec);
-				LoadPlayfield(&spec);
+				if (!hasTerrainOverride)
+				{
+					if (gAreaNum == 0)
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:AntHill.ter", &terrainSpec);
+					else
+						FSMakeFSSpec(gDataSpec.vRefNum, gDataSpec.parID, ":Terrain:AntKing.ter", &terrainSpec);
+				}
+				LoadPlayfield(&terrainSpec);
 
 				/* LOAD MODELS */
 						

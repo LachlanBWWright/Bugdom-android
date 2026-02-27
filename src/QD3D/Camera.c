@@ -351,8 +351,6 @@ void CalcCameraMatrixInfo(QD3DSetupOutputType *setupInfo)
 {
 			/* INIT PROJECTION MATRIX */
 
-	glMatrixMode(GL_PROJECTION);
-
 	FillProjectionMatrix(
 			&gCameraViewToFrustumMatrix,
 			setupInfo->fov,
@@ -360,11 +358,9 @@ void CalcCameraMatrixInfo(QD3DSetupOutputType *setupInfo)
 			setupInfo->hither,
 			setupInfo->yon);
 
-	glLoadMatrixf((const GLfloat*) &gCameraViewToFrustumMatrix.value[0][0]);
+	Render_SetProjectionMatrix(&gCameraViewToFrustumMatrix);
 
 			/* INIT MODELVIEW MATRIX */
-
-	glMatrixMode(GL_MODELVIEW);
 
 	FillLookAtMatrix(
 			&gCameraWorldToViewMatrix,
@@ -372,20 +368,11 @@ void CalcCameraMatrixInfo(QD3DSetupOutputType *setupInfo)
 			&setupInfo->currentCameraLookAt,
 			&setupInfo->currentCameraUpVector);
 
-	glLoadMatrixf((const GLfloat*) &gCameraWorldToViewMatrix.value[0][0]);
+	Render_SetModelViewMatrix(&gCameraWorldToViewMatrix);
 
-			/* UPDATE LIGHT POSITIONS */
+			/* UPDATE LIGHT POSITIONS (view-space directions) */
 
-	for (int i = 0; i < setupInfo->lightList.numFillLights; i++)
-	{
-		GLfloat lightVec[4];
-
-		lightVec[0] = -setupInfo->lightList.fillDirection[i].x;			// negate vector because OGL is stupid
-		lightVec[1] = -setupInfo->lightList.fillDirection[i].y;
-		lightVec[2] = -setupInfo->lightList.fillDirection[i].z;
-		lightVec[3] = 0;									// when w==0, this is a directional light, if 1 then point light
-		glLightfv(GL_LIGHT0+i, GL_POSITION, lightVec);
-	}
+	Render_SetLights(&setupInfo->lightList, &gCameraWorldToViewMatrix);
 
 
 			/* GET CAMERA VIEW MATRIX INFO */

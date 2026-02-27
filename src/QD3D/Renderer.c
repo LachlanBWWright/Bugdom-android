@@ -1,17 +1,30 @@
 // RENDERER.C
+// Modern OpenGL ES 2.0 / WebGL-compatible renderer
 // (C)2021 Iliyas Jorio
 // This file is part of Bugdom. https://github.com/jorio/bugdom
-
 
 /****************************/
 /*    EXTERNALS             */
 /****************************/
 
-#include "game.h"
-#include <SDL3/SDL.h>
-#include <SDL3/SDL_opengl.h>
-#include <QD3D.h>
+// On desktop (non-ES) builds, we need GL 2.0+ shader function prototypes.
+// Must be defined before game.h pulls in SDL_opengl.h -> SDL_opengl_glext.h.
+#if !defined(__EMSCRIPTEN__) && !defined(__ANDROID__)
+#define GL_GLEXT_PROTOTYPES 1
+#endif
 
+#include "game.h"
+
+#ifdef __EMSCRIPTEN__
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#elif defined(__ANDROID__)
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#endif
+
+#include <QD3D.h>
+#include <string.h>
 
 #pragma mark -
 
@@ -21,44 +34,77 @@
 
 typedef struct RendererState
 {
-	GLuint		boundTexture;
-	bool		hasClientState_GL_TEXTURE_COORD_ARRAY;
-	bool		hasClientState_GL_VERTEX_ARRAY;
-	bool		hasClientState_GL_COLOR_ARRAY;
-	bool		hasClientState_GL_NORMAL_ARRAY;
-	bool		hasState_GL_NORMALIZE;
-	bool		hasState_GL_CULL_FACE;
-	bool		hasState_GL_ALPHA_TEST;
-	bool		hasState_GL_DEPTH_TEST;
-	bool		hasState_GL_COLOR_MATERIAL;
-	bool		hasState_GL_TEXTURE_2D;
-	bool		hasState_GL_BLEND;
-	bool		hasState_GL_LIGHTING;
-	bool		hasState_GL_FOG;
-	bool		hasFlag_glDepthMask;
-	bool		blendFuncIsAdditive;
-	bool		sceneHasFog;
-	GLboolean	wantColorMask;
-	const TQ3Matrix4x4*	currentTransform;
+GLuint          shaderProgram;
+
+// Attribute locations
+GLint           loc_a_Position;
+GLint           loc_a_Normal;
+GLint           loc_a_TexCoord;
+GLint           loc_a_Color;
+
+// Uniform locations
+GLint           loc_u_Projection;
+GLint           loc_u_ModelView;
+GLint           loc_u_NormalMatrix;
+GLint           loc_u_DiffuseColor;
+GLint           loc_u_Texture0;
+GLint           loc_u_TextureEnabled;
+GLint           loc_u_LightingEnabled;
+GLint           loc_u_AmbientColor;
+GLint           loc_u_NumLights;
+GLint           loc_u_LightDir0;
+GLint           loc_u_LightColor0;
+GLint           loc_u_LightDir1;
+GLint           loc_u_LightColor1;
+GLint           loc_u_FogEnabled;
+GLint           loc_u_FogColor;
+GLint           loc_u_FogStart;
+GLint           loc_u_FogEnd;
+GLint           loc_u_AlphaTestEnabled;
+GLint           loc_u_AlphaThreshold;
+GLint           loc_u_UseVertexColors;
+
+// Tracked GL state
+GLuint          boundTexture;
+bool            attrib_Position;
+bool            attrib_Normal;
+bool            attrib_TexCoord;
+bool            attrib_Color;
+bool            textureEnabled;
+bool            lightingEnabled;
+bool            fogEnabled;
+bool            alphaTestEnabled;
+bool            useVertexColors;
+bool            sceneHasFog;
+float           fogStart;
+float           fogEnd;
+float           fogColor[4];
+bool            hasFlag_glDepthMask;
+bool            blendFuncIsAdditive;
+bool            hasState_GL_BLEND;
+bool            hasState_GL_DEPTH_TEST;
+bool            hasState_GL_CULL_FACE;
+GLboolean       wantColorMask;
+const TQ3Matrix4x4*  currentTransform;
 } RendererState;
 
 typedef struct MeshQueueEntry
 {
-	const TQ3TriMeshData*	mesh;
-	const TQ3Matrix4x4*		transform;	// may be NULL
-	const RenderModifiers*	mods;		// may be NULL
-	float					depth;		// used to determine draw order
-	bool					meshIsTransparent;
+const TQ3TriMeshData*   mesh;
+const TQ3Matrix4x4*     transform;
+const RenderModifiers*  mods;
+float                   depth;
+bool                    meshIsTransparent;
 } MeshQueueEntry;
 
 #define MESHQUEUE_MAX_SIZE 4096
 
-static MeshQueueEntry		gMeshQueueEntryPool[MESHQUEUE_MAX_SIZE];
-static MeshQueueEntry*		gMeshQueuePtrs[MESHQUEUE_MAX_SIZE];
-static int					gMeshQueueSize = 0;
-static bool					gFrameStarted = false;
+static MeshQueueEntry       gMeshQueueEntryPool[MESHQUEUE_MAX_SIZE];
+static MeshQueueEntry*      gMeshQueuePtrs[MESHQUEUE_MAX_SIZE];
+static int                  gMeshQueueSize = 0;
+static bool                 gFrameStarted = false;
 
-static float				gBackupVertexColors[4*65536];
+static float                gBackupVertexColors[4*65536];
 
 static int DrawOrderComparator(void const* a_void, void const* b_void);
 
@@ -67,7 +113,6 @@ static void BeginShadingPass(const MeshQueueEntry* entry);
 static void PrepareOpaqueShading(const MeshQueueEntry* entry);
 static void PrepareAlphaShading(const MeshQueueEntry* entry);
 static void SendGeometry(const MeshQueueEntry* entry);
-
 
 #pragma mark -
 
@@ -79,43 +124,120 @@ const TQ3Point3D kQ3Point3D_Zero = {0, 0, 0};
 
 static const RenderModifiers kDefaultRenderMods =
 {
-	.statusBits = 0,
-	.diffuseColor = {1,1,1,1},
-	.autoFadeFactor = 1.0f,
-	.drawOrder = 0,
+.statusBits     = 0,
+.diffuseColor   = {1,1,1,1},
+.autoFadeFactor = 1.0f,
+.drawOrder      = 0,
 };
 
 const RenderModifiers kDefaultRenderMods_UI =
 {
-	.statusBits = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE,
-	.diffuseColor = {1,1,1,1},
-	.autoFadeFactor = 1.0f,
-	.drawOrder = kDrawOrder_UI
+.statusBits     = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE,
+.diffuseColor   = {1,1,1,1},
+.autoFadeFactor = 1.0f,
+.drawOrder      = kDrawOrder_UI
 };
 
 static const RenderModifiers kDefaultRenderMods_FadeOverlay =
 {
-	.statusBits = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE,
-	.diffuseColor = {1,1,1,1},
-	.autoFadeFactor = 1.0f,
-	.drawOrder = kDrawOrder_FadeOverlay
+.statusBits     = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE,
+.diffuseColor   = {1,1,1,1},
+.autoFadeFactor = 1.0f,
+.drawOrder      = kDrawOrder_FadeOverlay
 };
 
 const RenderModifiers kDefaultRenderMods_DebugUI =
 {
-	.statusBits = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_DONTCULL,
-	.diffuseColor = {1,1,1,1},
-	.autoFadeFactor = 1.0f,
-	.drawOrder = kDrawOrder_DebugUI
+.statusBits     = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_DONTCULL,
+.diffuseColor   = {1,1,1,1},
+.autoFadeFactor = 1.0f,
+.drawOrder      = kDrawOrder_DebugUI
 };
 
 const RenderModifiers kDefaultRenderMods_Pillarbox =
 {
-	.statusBits = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_DONTCULL,
-	.diffuseColor = {0,0,0,1},
-	.autoFadeFactor = 1.0f,
-	.drawOrder = kDrawOrder_DebugUI
+.statusBits     = STATUS_BIT_NULLSHADER | STATUS_BIT_NOFOG | STATUS_BIT_NOZWRITE | STATUS_BIT_KEEPBACKFACES | STATUS_BIT_DONTCULL,
+.diffuseColor   = {0,0,0,1},
+.autoFadeFactor = 1.0f,
+.drawOrder      = kDrawOrder_DebugUI
 };
+
+#pragma mark -
+
+/****************************/
+/*    SHADER SOURCE         */
+/****************************/
+
+static const char* kVertexShaderSource =
+"precision mediump float;\n"
+"precision mediump int;\n"
+"attribute vec3 a_Position;\n"
+"attribute vec3 a_Normal;\n"
+"attribute vec2 a_TexCoord;\n"
+"attribute vec4 a_Color;\n"
+"uniform mat4 u_Projection;\n"
+"uniform mat4 u_ModelView;\n"
+"uniform mat3 u_NormalMatrix;\n"
+"uniform int  u_LightingEnabled;\n"
+"uniform vec4 u_AmbientColor;\n"
+"uniform int  u_NumLights;\n"
+"uniform vec3 u_LightDir0;\n"
+"uniform vec4 u_LightColor0;\n"
+"uniform vec3 u_LightDir1;\n"
+"uniform vec4 u_LightColor1;\n"
+"uniform int  u_UseVertexColors;\n"
+"uniform vec4 u_DiffuseColor;\n"
+"uniform int  u_FogEnabled;\n"
+"uniform float u_FogStart;\n"
+"uniform float u_FogEnd;\n"
+"varying vec2 v_TexCoord;\n"
+"varying vec4 v_Color;\n"
+"varying float v_FogFactor;\n"
+"void main() {\n"
+"    vec4 eyePos = u_ModelView * vec4(a_Position, 1.0);\n"
+"    gl_Position = u_Projection * eyePos;\n"
+"    v_TexCoord = a_TexCoord;\n"
+"    vec4 baseColor = (u_UseVertexColors != 0) ? a_Color : u_DiffuseColor;\n"
+"    if (u_LightingEnabled != 0) {\n"
+"        vec3 eyeNormal = normalize(u_NormalMatrix * a_Normal);\n"
+"        vec3 lit = u_AmbientColor.rgb;\n"
+"        if (u_NumLights > 0) { lit += u_LightColor0.rgb * max(dot(eyeNormal, u_LightDir0), 0.0); }\n"
+"        if (u_NumLights > 1) { lit += u_LightColor1.rgb * max(dot(eyeNormal, u_LightDir1), 0.0); }\n"
+"        v_Color = vec4(baseColor.rgb * clamp(lit, 0.0, 1.0), baseColor.a);\n"
+"    } else {\n"
+"        v_Color = baseColor;\n"
+"    }\n"
+"    if (u_FogEnabled != 0) {\n"
+"        float d = length(eyePos.xyz);\n"
+"        v_FogFactor = clamp((u_FogEnd - d) / (u_FogEnd - u_FogStart), 0.0, 1.0);\n"
+"    } else {\n"
+"        v_FogFactor = 1.0;\n"
+"    }\n"
+"}\n";
+
+static const char* kFragmentShaderSource =
+"precision mediump float;\n"
+"precision mediump int;\n"
+"uniform sampler2D u_Texture0;\n"
+"uniform int u_TextureEnabled;\n"
+"uniform int u_AlphaTestEnabled;\n"
+"uniform float u_AlphaThreshold;\n"
+"uniform vec4 u_FogColor;\n"
+"uniform int u_FogEnabled;\n"
+"varying vec2 v_TexCoord;\n"
+"varying vec4 v_Color;\n"
+"varying float v_FogFactor;\n"
+"void main() {\n"
+"    vec4 color;\n"
+"    if (u_TextureEnabled != 0) {\n"
+"        color = v_Color * texture2D(u_Texture0, v_TexCoord);\n"
+"    } else {\n"
+"        color = v_Color;\n"
+"    }\n"
+"    if (u_AlphaTestEnabled != 0 && color.a < u_AlphaThreshold) discard;\n"
+"    if (u_FogEnabled != 0) { color.rgb = mix(u_FogColor.rgb, color.rgb, v_FogFactor); }\n"
+"    gl_FragColor = color;\n"
+"}\n";
 
 #pragma mark -
 
@@ -124,90 +246,194 @@ const RenderModifiers kDefaultRenderMods_Pillarbox =
 /****************************/
 
 static SDL_GLContext gGLContext = NULL;
-
 static RendererState gState;
-
 float gGammaFadeFactor = 1.0f;
-
 static TQ3TriMeshData* gFullscreenQuad = nil;
+
+// Current matrices (set by camera / 2D mode)
+static TQ3Matrix4x4 gCurrentProjection;
+static TQ3Matrix4x4 gCurrentModelView;
+
+// Matrix stack for 2D mode push/pop
+#define MATRIX_STACK_DEPTH 4
+static TQ3Matrix4x4 gProjectionStack[MATRIX_STACK_DEPTH];
+static TQ3Matrix4x4 gModelViewStack[MATRIX_STACK_DEPTH];
+static int gMatrixStackTop = 0;
 
 #pragma mark -
 
 /****************************/
-/*    MACROS/HELPERS        */
+/*    HELPERS               */
 /****************************/
 
-static void __SetInitialState(GLenum stateEnum, bool* stateFlagPtr, bool initialValue)
+#if _DEBUG
+void DoFatalGLError(GLenum error, const char* file, int line)
 {
-	*stateFlagPtr = initialValue;
-	if (initialValue)
-		glEnable(stateEnum);
-	else
-		glDisable(stateEnum);
-	CHECK_GL_ERROR();
+static char alertbuf[1024];
+SDL_snprintf(alertbuf, sizeof(alertbuf), "OpenGL error 0x%x\nin %s:%d", error, file, line);
+DoFatalAlert(alertbuf);
+}
+#endif
+
+static GLuint CompileShader(GLenum type, const char* source)
+{
+GLuint shader = glCreateShader(type);
+glShaderSource(shader, 1, &source, NULL);
+glCompileShader(shader);
+
+GLint status;
+glGetShaderiv(shader, GL_COMPILE_STATUS, &status);
+if (!status)
+{
+char log[1024];
+glGetShaderInfoLog(shader, sizeof(log), NULL, log);
+SDL_Log("Shader compile error:\n%s\n", log);
+GAME_ASSERT_MESSAGE(false, "Shader compile failed");
+}
+return shader;
 }
 
-static void __SetInitialClientState(GLenum stateEnum, bool* stateFlagPtr, bool initialValue)
+static void CreateShaderProgram(void)
 {
-	*stateFlagPtr = initialValue;
-	if (initialValue)
-		glEnableClientState(stateEnum);
-	else
-		glDisableClientState(stateEnum);
-	CHECK_GL_ERROR();
+GLuint vert = CompileShader(GL_VERTEX_SHADER,   kVertexShaderSource);
+GLuint frag = CompileShader(GL_FRAGMENT_SHADER, kFragmentShaderSource);
+
+gState.shaderProgram = glCreateProgram();
+glAttachShader(gState.shaderProgram, vert);
+glAttachShader(gState.shaderProgram, frag);
+
+// Bind attribute locations before link
+glBindAttribLocation(gState.shaderProgram, 0, "a_Position");
+glBindAttribLocation(gState.shaderProgram, 1, "a_Normal");
+glBindAttribLocation(gState.shaderProgram, 2, "a_TexCoord");
+glBindAttribLocation(gState.shaderProgram, 3, "a_Color");
+
+glLinkProgram(gState.shaderProgram);
+
+GLint status;
+glGetProgramiv(gState.shaderProgram, GL_LINK_STATUS, &status);
+if (!status)
+{
+char log[1024];
+glGetProgramInfoLog(gState.shaderProgram, sizeof(log), NULL, log);
+SDL_Log("Shader link error:\n%s\n", log);
+GAME_ASSERT_MESSAGE(false, "Shader link failed");
 }
 
-static inline void __SetState(GLenum stateEnum, bool* stateFlagPtr, bool enable)
-{
-	if (enable != *stateFlagPtr)
-	{
-		if (enable)
-			glEnable(stateEnum);
-		else
-			glDisable(stateEnum);
-		*stateFlagPtr = enable;
-	}
+glDeleteShader(vert);
+glDeleteShader(frag);
+
+glUseProgram(gState.shaderProgram);
+
+// Cache attribute locations
+gState.loc_a_Position        = glGetAttribLocation(gState.shaderProgram, "a_Position");
+gState.loc_a_Normal          = glGetAttribLocation(gState.shaderProgram, "a_Normal");
+gState.loc_a_TexCoord        = glGetAttribLocation(gState.shaderProgram, "a_TexCoord");
+gState.loc_a_Color           = glGetAttribLocation(gState.shaderProgram, "a_Color");
+
+// Cache uniform locations
+gState.loc_u_Projection      = glGetUniformLocation(gState.shaderProgram, "u_Projection");
+gState.loc_u_ModelView       = glGetUniformLocation(gState.shaderProgram, "u_ModelView");
+gState.loc_u_NormalMatrix    = glGetUniformLocation(gState.shaderProgram, "u_NormalMatrix");
+gState.loc_u_DiffuseColor    = glGetUniformLocation(gState.shaderProgram, "u_DiffuseColor");
+gState.loc_u_Texture0        = glGetUniformLocation(gState.shaderProgram, "u_Texture0");
+gState.loc_u_TextureEnabled  = glGetUniformLocation(gState.shaderProgram, "u_TextureEnabled");
+gState.loc_u_LightingEnabled = glGetUniformLocation(gState.shaderProgram, "u_LightingEnabled");
+gState.loc_u_AmbientColor    = glGetUniformLocation(gState.shaderProgram, "u_AmbientColor");
+gState.loc_u_NumLights       = glGetUniformLocation(gState.shaderProgram, "u_NumLights");
+gState.loc_u_LightDir0       = glGetUniformLocation(gState.shaderProgram, "u_LightDir0");
+gState.loc_u_LightColor0     = glGetUniformLocation(gState.shaderProgram, "u_LightColor0");
+gState.loc_u_LightDir1       = glGetUniformLocation(gState.shaderProgram, "u_LightDir1");
+gState.loc_u_LightColor1     = glGetUniformLocation(gState.shaderProgram, "u_LightColor1");
+gState.loc_u_FogEnabled      = glGetUniformLocation(gState.shaderProgram, "u_FogEnabled");
+gState.loc_u_FogColor        = glGetUniformLocation(gState.shaderProgram, "u_FogColor");
+gState.loc_u_FogStart        = glGetUniformLocation(gState.shaderProgram, "u_FogStart");
+gState.loc_u_FogEnd          = glGetUniformLocation(gState.shaderProgram, "u_FogEnd");
+gState.loc_u_AlphaTestEnabled= glGetUniformLocation(gState.shaderProgram, "u_AlphaTestEnabled");
+gState.loc_u_AlphaThreshold  = glGetUniformLocation(gState.shaderProgram, "u_AlphaThreshold");
+gState.loc_u_UseVertexColors = glGetUniformLocation(gState.shaderProgram, "u_UseVertexColors");
+
+// Set texture sampler to unit 0
+glUniform1i(gState.loc_u_Texture0, 0);
+
+// Set initial defaults that never change
+glUniform1f(gState.loc_u_AlphaThreshold, 0.4999f);
+glUniform1i(gState.loc_u_NumLights, 0);
+glUniform4f(gState.loc_u_AmbientColor, 1, 1, 1, 1);
 }
 
-static inline void __SetClientState(GLenum stateEnum, bool* stateFlagPtr, bool enable)
+static void UploadMatrix4x4(GLint loc, const TQ3Matrix4x4* m)
 {
-	if (enable != *stateFlagPtr)
-	{
-		if (enable)
-			glEnableClientState(stateEnum);
-		else
-			glDisableClientState(stateEnum);
-		*stateFlagPtr = enable;
-	}
+// TQ3Matrix4x4 is column-major (value[col][row]), which matches OpenGL's expected layout.
+// WebGL 1 requires transpose=GL_FALSE.
+glUniformMatrix4fv(loc, 1, GL_FALSE, (const float*) m->value);
 }
 
-#define SetInitialState(stateEnum, initialValue) __SetInitialState(stateEnum, &gState.hasState_##stateEnum, initialValue)
-#define SetInitialClientState(stateEnum, initialValue) __SetInitialClientState(stateEnum, &gState.hasClientState_##stateEnum, initialValue)
+static void UploadMatrix3x3NormalFromMV(const TQ3Matrix4x4* mv)
+{
+// Normal matrix = upper-left 3x3 of modelview (valid for rigid/uniform-scale transforms).
+// Supply column-major (GL_FALSE) by treating TQ3 rows as GL columns.
+float nm[9] = {
+mv->value[0][0], mv->value[0][1], mv->value[0][2],
+mv->value[1][0], mv->value[1][1], mv->value[1][2],
+mv->value[2][0], mv->value[2][1], mv->value[2][2],
+};
+glUniformMatrix3fv(gState.loc_u_NormalMatrix, 1, GL_FALSE, nm);
+}
 
-#define SetState(stateEnum, value) __SetState(stateEnum, &gState.hasState_##stateEnum, (value))
+static inline void SetAttrib(int loc, bool* flag, bool enable)
+{
+if (enable != *flag)
+{
+if (enable)
+glEnableVertexAttribArray(loc);
+else
+glDisableVertexAttribArray(loc);
+*flag = enable;
+}
+}
 
-#define EnableState(stateEnum) __SetState(stateEnum, &gState.hasState_##stateEnum, true)
-#define EnableClientState(stateEnum) __SetClientState(stateEnum, &gState.hasClientState_##stateEnum, true)
+#define EnableAttrib(name)  SetAttrib(gState.loc_a_##name, &gState.attrib_##name, true)
+#define DisableAttrib(name) SetAttrib(gState.loc_a_##name, &gState.attrib_##name, false)
 
-#define DisableState(stateEnum) __SetState(stateEnum, &gState.hasState_##stateEnum, false)
-#define DisableClientState(stateEnum) __SetClientState(stateEnum, &gState.hasClientState_##stateEnum, false)
+static inline void SetStateGL(GLenum s, bool* flag, bool enable)
+{
+if (enable != *flag)
+{
+if (enable)
+glEnable(s);
+else
+glDisable(s);
+*flag = enable;
+}
+}
 
-#define RestoreStateFromBackup(stateEnum, backup) __SetState(stateEnum, &gState.hasState_##stateEnum, (backup)->hasState_##stateEnum)
-#define RestoreClientStateFromBackup(stateEnum, backup) __SetClientState(stateEnum, &gState.hasClientState_##stateEnum, (backup)->hasClientState_##stateEnum)
+#define EnableState(s)  SetStateGL(s, &gState.hasState_##s, true)
+#define DisableState(s) SetStateGL(s, &gState.hasState_##s, false)
+#define SetState(s, v)  SetStateGL(s, &gState.hasState_##s, (v))
 
-#define SetFlag(glFunction, value) do {				\
-	if ((value) != gState.hasFlag_##glFunction) {	\
-		glFunction((value)? GL_TRUE: GL_FALSE);		\
-		gState.hasFlag_##glFunction = (value);		\
-	} } while(0)
+#define SetFlag(glFn, val) do { \
+if ((val) != gState.hasFlag_##glFn) { \
+glFn((val) ? GL_TRUE : GL_FALSE); \
+gState.hasFlag_##glFn = (val); \
+} } while(0)
 
 static inline void SetColorMask(GLboolean enable)
 {
-	if (enable != gState.wantColorMask)
-	{
-		glColorMask(enable, enable, enable, enable);
-		gState.wantColorMask = enable;
-	}
+if (enable != gState.wantColorMask)
+{
+glColorMask(enable, enable, enable, enable);
+gState.wantColorMask = enable;
+}
+}
+
+static inline void SetUniformBool(GLint loc, bool* tracked, bool val)
+{
+if (val != *tracked)
+{
+glUniform1i(loc, val ? 1 : 0);
+*tracked = val;
+}
 }
 
 #pragma mark -
@@ -218,829 +444,922 @@ static inline void SetColorMask(GLboolean enable)
 /*    API IMPLEMENTATION    */
 /****************************/
 
-#if _DEBUG
-void DoFatalGLError(GLenum error, const char* file, int line)
-{
-	static char alertbuf[1024];
-	SDL_snprintf(alertbuf, sizeof(alertbuf), "OpenGL error 0x%x\nin %s:%d", error, file, line);
-	DoFatalAlert(alertbuf);
-}
-#endif
-
 void Render_CreateContext(void)
 {
-	gGLContext = SDL_GL_CreateContext(gSDLWindow);
-
-	GAME_ASSERT(gGLContext);
-
-	// On Windows, proc addresses are only valid for the current context,
-	// so we must get proc addresses everytime we recreate the context.
-	//Render_GetGLProcAddresses();
+gGLContext = SDL_GL_CreateContext(gSDLWindow);
+GAME_ASSERT(gGLContext);
 }
 
 void Render_DeleteContext(void)
 {
-	if (gGLContext)
-	{
-		SDL_GL_DestroyContext(gGLContext);
-		gGLContext = NULL;
-	}
+if (gGLContext)
+{
+SDL_GL_DestroyContext(gGLContext);
+gGLContext = NULL;
+}
 }
 
 void Render_SetDefaultModifiers(RenderModifiers* dest)
 {
-	SDL_memcpy(dest, &kDefaultRenderMods, sizeof(RenderModifiers));
+SDL_memcpy(dest, &kDefaultRenderMods, sizeof(RenderModifiers));
+}
+
+void Render_SetProjectionMatrix(const TQ3Matrix4x4* m)
+{
+gCurrentProjection = *m;
+UploadMatrix4x4(gState.loc_u_Projection, &gCurrentProjection);
+}
+
+void Render_SetModelViewMatrix(const TQ3Matrix4x4* m)
+{
+gCurrentModelView = *m;
+UploadMatrix4x4(gState.loc_u_ModelView, &gCurrentModelView);
+UploadMatrix3x3NormalFromMV(&gCurrentModelView);
+}
+
+void Render_SetLights(const QD3DLightDefType* lights, const TQ3Matrix4x4* viewMatrix)
+{
+// Ambient
+glUniform4f(gState.loc_u_AmbientColor,
+lights->ambientBrightness * lights->ambientColor.r,
+lights->ambientBrightness * lights->ambientColor.g,
+lights->ambientBrightness * lights->ambientColor.b,
+1.0f);
+
+int numLights = (int) lights->numFillLights;
+if (numLights > 2)
+numLights = 2;
+glUniform1i(gState.loc_u_NumLights, numLights);
+
+for (int i = 0; i < numLights; i++)
+{
+// Negate direction (toward-light convention)
+TQ3Vector3D dir = {
+-lights->fillDirection[i].x,
+-lights->fillDirection[i].y,
+-lights->fillDirection[i].z
+};
+
+// Transform direction to view space (transpose of upper-left 3x3 of viewMatrix)
+TQ3Vector3D dirView;
+dirView.x = viewMatrix->value[0][0]*dir.x + viewMatrix->value[1][0]*dir.y + viewMatrix->value[2][0]*dir.z;
+dirView.y = viewMatrix->value[0][1]*dir.x + viewMatrix->value[1][1]*dir.y + viewMatrix->value[2][1]*dir.z;
+dirView.z = viewMatrix->value[0][2]*dir.x + viewMatrix->value[1][2]*dir.y + viewMatrix->value[2][2]*dir.z;
+
+// Normalize
+float len = sqrtf(dirView.x*dirView.x + dirView.y*dirView.y + dirView.z*dirView.z);
+if (len > 0.0001f)
+{
+dirView.x /= len;
+dirView.y /= len;
+dirView.z /= len;
+}
+
+GLint locDir   = (i == 0) ? gState.loc_u_LightDir0  : gState.loc_u_LightDir1;
+GLint locColor = (i == 0) ? gState.loc_u_LightColor0 : gState.loc_u_LightColor1;
+
+glUniform3f(locDir, dirView.x, dirView.y, dirView.z);
+glUniform4f(locColor,
+lights->fillColor[i].r * lights->fillBrightness[i],
+lights->fillColor[i].g * lights->fillBrightness[i],
+lights->fillColor[i].b * lights->fillBrightness[i],
+1.0f);
+}
 }
 
 void Render_InitState(const TQ3ColorRGBA* clearColor)
 {
-	SetInitialClientState(GL_VERTEX_ARRAY,				true);
-	SetInitialClientState(GL_NORMAL_ARRAY,				false);
-	SetInitialClientState(GL_COLOR_ARRAY,				false);
-	SetInitialClientState(GL_TEXTURE_COORD_ARRAY,		false);
-	SetInitialState(GL_NORMALIZE,		true);		// Normalize normal vectors. Required so lighting looks correct on scaled meshes.
-	SetInitialState(GL_CULL_FACE,		true);
-	SetInitialState(GL_ALPHA_TEST,		true);
-	SetInitialState(GL_DEPTH_TEST,		true);
-	SetInitialState(GL_COLOR_MATERIAL,	true);
-	SetInitialState(GL_TEXTURE_2D,		false);
-	SetInitialState(GL_BLEND,			false);
-	SetInitialState(GL_LIGHTING,		true);
-	SetInitialState(GL_FOG,				false);
+// Compile & link shaders
+CreateShaderProgram();
 
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-	gState.blendFuncIsAdditive = false;		// must match glBlendFunc call above!
-	
-	glDepthMask(true);
-	gState.hasFlag_glDepthMask = true;		// must match glDepthMask call above!
+// Depth / blend / face culling
+glEnable(GL_DEPTH_TEST);    gState.hasState_GL_DEPTH_TEST = true;
+glEnable(GL_CULL_FACE);     gState.hasState_GL_CULL_FACE  = true;
+glDisable(GL_BLEND);        gState.hasState_GL_BLEND       = false;
 
-	glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-	gState.wantColorMask = true;			// must match glColorMask call above!
+glDepthMask(GL_TRUE);
+gState.hasFlag_glDepthMask = true;
 
-	glColor4f(1.0f, 1.0f, 1.0f, 1.0f);
-	
-	gState.boundTexture = 0;
-	gState.sceneHasFog = false;
-	gState.currentTransform = NULL;
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+gState.blendFuncIsAdditive = false;
 
-	glClearColor(clearColor->r, clearColor->g, clearColor->b, 1.0f);
-	
-	// Set misc GL defaults that apply throughout the entire game
-	glAlphaFunc(GL_GREATER, 0.4999f);
-	glFrontFace(GL_CCW);
-	glColorMaterial(GL_FRONT_AND_BACK, GL_AMBIENT_AND_DIFFUSE);
+glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+gState.wantColorMask = true;
 
-	// Set up mesh queue
-	gMeshQueueSize = 0;
-	SDL_memset(gMeshQueuePtrs, 0, sizeof(gMeshQueuePtrs));
+glFrontFace(GL_CCW);
 
-	// Set up fullscreen overlay quad
-	if (!gFullscreenQuad)
-	{
-		gFullscreenQuad = MakeQuadMesh_UI(0, 0, GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT, 0, 0, 1, 1);
-	}
+// Position attrib always enabled; others off
+glEnableVertexAttribArray(0);   gState.attrib_Position = true;
+glDisableVertexAttribArray(1);  gState.attrib_Normal   = false;
+glDisableVertexAttribArray(2);  gState.attrib_TexCoord = false;
+glDisableVertexAttribArray(3);  gState.attrib_Color    = false;
 
-	// Clear the buffers
-	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+// Shader uniform initial state
+gState.textureEnabled   = false;    glUniform1i(gState.loc_u_TextureEnabled,   0);
+gState.lightingEnabled  = true;     glUniform1i(gState.loc_u_LightingEnabled,  1);
+gState.fogEnabled       = false;    glUniform1i(gState.loc_u_FogEnabled,       0);
+gState.alphaTestEnabled = false;    glUniform1i(gState.loc_u_AlphaTestEnabled, 0);
+gState.useVertexColors  = false;    glUniform1i(gState.loc_u_UseVertexColors,  0);
 
-	CHECK_GL_ERROR();
+glUniform4f(gState.loc_u_DiffuseColor, 1, 1, 1, 1);
+glUniform4f(gState.loc_u_FogColor, 0, 0, 0, 1);
+
+gState.sceneHasFog      = false;
+gState.boundTexture     = 0;
+gState.currentTransform = NULL;
+
+glClearColor(clearColor->r, clearColor->g, clearColor->b, 1.0f);
+glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+// Set up mesh queue & fullscreen overlay quad
+gMeshQueueSize = 0;
+SDL_memset(gMeshQueuePtrs, 0, sizeof(gMeshQueuePtrs));
+
+if (!gFullscreenQuad)
+{
+gFullscreenQuad = MakeQuadMesh_UI(0, 0, GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT, 0, 0, 1, 1);
+}
+
+CHECK_GL_ERROR();
 }
 
 void Render_EndScene(void)
 {
-	if (gFullscreenQuad)
-	{
-		Q3TriMeshData_Dispose(gFullscreenQuad);
-		gFullscreenQuad = NULL;
-	}
+if (gFullscreenQuad)
+{
+Q3TriMeshData_Dispose(gFullscreenQuad);
+gFullscreenQuad = NULL;
+}
 }
 
 void Render_EnableFog(
-		float camHither,
-		float camYon,
-		float fogHither,
-		float fogYon,
-		TQ3ColorRGBA fogColor)
+float camHither,
+float camYon,
+float fogHither,
+float fogYon,
+TQ3ColorRGBA fogColor)
 {
-	(void) camHither;
+(void) camHither;
 
-	glHint(GL_FOG_HINT,		GL_NICEST);
-	glFogi(GL_FOG_MODE,		GL_LINEAR);
-	glFogf(GL_FOG_START,	fogHither * camYon);
-	glFogf(GL_FOG_END,		fogYon * camYon);
-	glFogfv(GL_FOG_COLOR,	&fogColor.r);
-	gState.sceneHasFog = true;
+gState.fogStart    = fogHither * camYon;
+gState.fogEnd      = fogYon   * camYon;
+gState.fogColor[0] = fogColor.r;
+gState.fogColor[1] = fogColor.g;
+gState.fogColor[2] = fogColor.b;
+gState.fogColor[3] = fogColor.a;
+
+glUniform1f(gState.loc_u_FogStart, gState.fogStart);
+glUniform1f(gState.loc_u_FogEnd,   gState.fogEnd);
+glUniform4f(gState.loc_u_FogColor, fogColor.r, fogColor.g, fogColor.b, fogColor.a);
+
+gState.sceneHasFog = true;
 }
 
 void Render_DisableFog(void)
 {
-	gState.sceneHasFog = false;
+gState.sceneHasFog = false;
 }
 
 #pragma mark -
 
 void Render_BindTexture(GLuint textureName)
 {
-	if (gState.boundTexture != textureName)
-	{
-		glBindTexture(GL_TEXTURE_2D, textureName);
-		gState.boundTexture = textureName;
-	}
+if (gState.boundTexture != textureName)
+{
+glBindTexture(GL_TEXTURE_2D, textureName);
+gState.boundTexture = textureName;
+}
 }
 
-GLuint Render_LoadTexture(
-		GLenum internalFormat,
-		int width,
-		int height,
-		GLenum bufferFormat,
-		GLenum bufferType,
-		const GLvoid* pixels,
-		RendererTextureFlags flags)
+#pragma mark - Texture Loading
+
+#ifdef __EMSCRIPTEN__
+static void* ConvertBGRA32ToRGBA(const void* src, int width, int height)
 {
-	GAME_ASSERT(gGLContext);
+int n = width * height;
+uint8_t* dst = (uint8_t*) AllocPtr(n * 4);
+const uint8_t* s = (const uint8_t*) src;
+for (int i = 0; i < n; i++)
+{
+dst[i*4+0] = s[i*4+2];     // R
+dst[i*4+1] = s[i*4+1];     // G
+dst[i*4+2] = s[i*4+0];     // B
+dst[i*4+3] = s[i*4+3];     // A
+}
+return dst;
+}
 
-	GLuint textureName;
+static void* ConvertBGR24ToRGB(const void* src, int width, int height)
+{
+int n = width * height;
+uint8_t* dst = (uint8_t*) AllocPtr(n * 3);
+const uint8_t* s = (const uint8_t*) src;
+for (int i = 0; i < n; i++)
+{
+dst[i*3+0] = s[i*3+2];     // R
+dst[i*3+1] = s[i*3+1];     // G
+dst[i*3+2] = s[i*3+0];     // B
+}
+return dst;
+}
 
-	glGenTextures(1, &textureName);
-	CHECK_GL_ERROR();
+// Convert 16-bit 1555 (GL_UNSIGNED_SHORT_1_5_5_5_REV + GL_BGRA) to RGBA8
+static void* Convert1555ToRGBA8(const void* src, int width, int height, bool hasAlpha)
+{
+int n = width * height;
+uint8_t* dst = (uint8_t*) AllocPtr(n * 4);
+const uint16_t* s = (const uint16_t*) src;
+for (int i = 0; i < n; i++)
+{
+uint16_t v = s[i];
+uint8_t b = (v & 0x001F);
+uint8_t g = (v >> 5)  & 0x1F;
+uint8_t r = (v >> 10) & 0x1F;
+uint8_t a = (v >> 15) & 1;
+dst[i*4+0] = (r << 3) | (r >> 2);
+dst[i*4+1] = (g << 3) | (g >> 2);
+dst[i*4+2] = (b << 3) | (b >> 2);
+dst[i*4+3] = hasAlpha ? (a ? 255 : 0) : 255;
+}
+return dst;
+}
+#endif // __EMSCRIPTEN__
 
-	Render_BindTexture(textureName);				// this is now the currently active texture
-	CHECK_GL_ERROR();
+GLuint Render_LoadTexture(
+GLenum internalFormat,
+int width,
+int height,
+GLenum bufferFormat,
+GLenum bufferType,
+const GLvoid* pixels,
+RendererTextureFlags flags)
+{
+GAME_ASSERT(gGLContext);
 
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, !gGamePrefs.lowDetail? GL_LINEAR: GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, !gGamePrefs.lowDetail? GL_LINEAR: GL_NEAREST);
+GLuint textureName;
+glGenTextures(1, &textureName);
+CHECK_GL_ERROR();
 
-	if (flags & kRendererTextureFlags_ClampU)
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+Render_BindTexture(textureName);
+CHECK_GL_ERROR();
 
-	if (flags & kRendererTextureFlags_ClampV)
-		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, !gGamePrefs.lowDetail ? GL_LINEAR : GL_NEAREST);
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, !gGamePrefs.lowDetail ? GL_LINEAR : GL_NEAREST);
 
-	glTexImage2D(
-			GL_TEXTURE_2D,
-			0,						// mipmap level
-			internalFormat,			// format in OpenGL
-			width,					// width in pixels
-			height,					// height in pixels
-			0,						// border
-			bufferFormat,			// what my format is
-			bufferType,				// size of each r,g,b
-			pixels);				// pointer to the actual texture pixels
-	CHECK_GL_ERROR();
+if (flags & kRendererTextureFlags_ClampU)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+if (flags & kRendererTextureFlags_ClampV)
+glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 
-	return textureName;
+#ifdef __EMSCRIPTEN__
+// WebGL 1 only supports RGBA/RGB + UNSIGNED_BYTE (and a few 16-bit packed types).
+// Convert from Mac/legacy pixel formats to WebGL-compatible ones.
+void* converted = NULL;
+GLenum glFormat = GL_RGBA;
+GLenum glType   = GL_UNSIGNED_BYTE;
+
+if (bufferFormat == GL_BGRA && bufferType == GL_UNSIGNED_INT_8_8_8_8_REV)
+{
+converted = ConvertBGRA32ToRGBA(pixels, width, height);
+glFormat  = GL_RGBA;
+}
+else if (bufferFormat == GL_BGR && bufferType == GL_UNSIGNED_BYTE)
+{
+converted = ConvertBGR24ToRGB(pixels, width, height);
+glFormat  = GL_RGB;
+}
+else if (bufferFormat == GL_BGRA && bufferType == GL_UNSIGNED_SHORT_1_5_5_5_REV)
+{
+bool hasAlpha = (internalFormat == GL_RGBA);
+converted = Convert1555ToRGBA8(pixels, width, height, hasAlpha);
+glFormat  = GL_RGBA;
+}
+else
+{
+glFormat = bufferFormat;
+glType   = bufferType;
+}
+
+glTexImage2D(GL_TEXTURE_2D, 0, glFormat, width, height, 0,
+glFormat, glType, converted ? converted : pixels);
+
+if (converted)
+DisposePtr((Ptr) converted);
+#else
+glTexImage2D(GL_TEXTURE_2D, 0, internalFormat, width, height, 0,
+bufferFormat, bufferType, pixels);
+#endif
+
+CHECK_GL_ERROR();
+return textureName;
 }
 
 void Render_UpdateTexture(
-		GLuint textureName,
-		int x,
-		int y,
-		int width,
-		int height,
-		GLenum bufferFormat,
-		GLenum bufferType,
-		const GLvoid* pixels,
-		int rowBytesInInput)
+GLuint textureName,
+int x,
+int y,
+int width,
+int height,
+GLenum bufferFormat,
+GLenum bufferType,
+const GLvoid* pixels,
+int rowBytesInInput)
 {
-	GLint pUnpackRowLength = 0;
+Render_BindTexture(textureName);
 
-	Render_BindTexture(textureName);
+#ifdef __EMSCRIPTEN__
+// WebGL 1 does not support GL_UNPACK_ROW_LENGTH.
+// Copy to a contiguous temp buffer when rowBytesInInput is given.
+if (rowBytesInInput > 0)
+{
+int bpp = 4;
+if (bufferFormat == GL_RGB)        bpp = 3;
+else if (bufferFormat == GL_ALPHA) bpp = 1;
+int lineBytes = width * bpp;
+uint8_t* tmp = (uint8_t*) AllocPtr(height * lineBytes);
+const uint8_t* src = (const uint8_t*) pixels;
+for (int row = 0; row < height; row++)
+SDL_memcpy(tmp + row * lineBytes, src + row * rowBytesInInput, lineBytes);
+glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, bufferFormat, bufferType, tmp);
+DisposePtr((Ptr) tmp);
+}
+else
+{
+glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, bufferFormat, bufferType, pixels);
+}
+#else
+GLint pUnpackRowLength = 0;
+if (rowBytesInInput > 0)
+{
+glGetIntegerv(GL_UNPACK_ROW_LENGTH, &pUnpackRowLength);
+glPixelStorei(GL_UNPACK_ROW_LENGTH, rowBytesInInput);
+}
+glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, bufferFormat, bufferType, pixels);
+if (rowBytesInInput > 0)
+glPixelStorei(GL_UNPACK_ROW_LENGTH, pUnpackRowLength);
+#endif
 
-	// Set unpack row length (if valid rowbytes input given)
-	if (rowBytesInInput > 0)
-	{
-		glGetIntegerv(GL_UNPACK_ROW_LENGTH, &pUnpackRowLength);
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, rowBytesInInput);
-	}
-
-	glTexSubImage2D(
-			GL_TEXTURE_2D,
-			0,
-			x,
-			y,
-			width,
-			height,
-			bufferFormat,
-			bufferType,
-			pixels);
-	CHECK_GL_ERROR();
-
-	// Restore unpack row length
-	if (rowBytesInInput > 0)
-	{
-		glPixelStorei(GL_UNPACK_ROW_LENGTH, pUnpackRowLength);
-	}
+CHECK_GL_ERROR();
 }
 
 void Render_Load3DMFTextures(TQ3MetaFile* metaFile, GLuint* outTextureNames, bool forceClampUVs)
 {
-	for (int i = 0; i < metaFile->numTextures; i++)
-	{
-		TQ3TextureShader* textureShader = &metaFile->textures[i];
+for (int i = 0; i < metaFile->numTextures; i++)
+{
+TQ3TextureShader* textureShader = &metaFile->textures[i];
+GAME_ASSERT(textureShader->pixmap);
 
-		GAME_ASSERT(textureShader->pixmap);
+TQ3TexturingMode meshTexturingMode = kQ3TexturingModeOff;
+GLenum internalFormat;
+GLenum format;
+GLenum type;
 
-		TQ3TexturingMode meshTexturingMode = kQ3TexturingModeOff;
-		GLenum internalFormat;
-		GLenum format;
-		GLenum type;
-		switch (textureShader->pixmap->pixelType)
-		{
-			case kQ3PixelTypeRGB32:
-				meshTexturingMode = kQ3TexturingModeOpaque;
-				internalFormat = GL_RGB;
-				format = GL_BGRA;
-				type = GL_UNSIGNED_INT_8_8_8_8_REV;
-				break;
-			case kQ3PixelTypeARGB32:
-				meshTexturingMode = kQ3TexturingModeAlphaBlend;
-				internalFormat = GL_RGBA;
-				format = GL_BGRA;
-				type = GL_UNSIGNED_INT_8_8_8_8_REV;
-				break;
-			case kQ3PixelTypeRGB16:
-				meshTexturingMode = kQ3TexturingModeOpaque;
-				internalFormat = GL_RGB;
-				format = GL_BGRA;
-				type = GL_UNSIGNED_SHORT_1_5_5_5_REV;
-				break;
-			case kQ3PixelTypeARGB16:
-				meshTexturingMode = kQ3TexturingModeAlphaTest;
-				internalFormat = GL_RGBA;
-				format = GL_BGRA;
-				type = GL_UNSIGNED_SHORT_1_5_5_5_REV;
-				break;
-			case kQ3PixelTypeRGB24:
-				meshTexturingMode = kQ3TexturingModeOpaque;
-				internalFormat = GL_RGB;
-				format = GL_BGR;
-				type = GL_UNSIGNED_BYTE;
-				break;
-			default:
-				DoAlert("3DMF texture: Unsupported kQ3PixelType");
-				continue;
-		}
+switch (textureShader->pixmap->pixelType)
+{
+case kQ3PixelTypeRGB32:
+meshTexturingMode = kQ3TexturingModeOpaque;
+internalFormat = GL_RGB;
+format = GL_BGRA;
+type   = GL_UNSIGNED_INT_8_8_8_8_REV;
+break;
+case kQ3PixelTypeARGB32:
+meshTexturingMode = kQ3TexturingModeAlphaBlend;
+internalFormat = GL_RGBA;
+format = GL_BGRA;
+type   = GL_UNSIGNED_INT_8_8_8_8_REV;
+break;
+case kQ3PixelTypeRGB16:
+meshTexturingMode = kQ3TexturingModeOpaque;
+internalFormat = GL_RGB;
+format = GL_BGRA;
+type   = GL_UNSIGNED_SHORT_1_5_5_5_REV;
+break;
+case kQ3PixelTypeARGB16:
+meshTexturingMode = kQ3TexturingModeAlphaTest;
+internalFormat = GL_RGBA;
+format = GL_BGRA;
+type   = GL_UNSIGNED_SHORT_1_5_5_5_REV;
+break;
+case kQ3PixelTypeRGB24:
+meshTexturingMode = kQ3TexturingModeOpaque;
+internalFormat = GL_RGB;
+format = GL_BGR;
+type   = GL_UNSIGNED_BYTE;
+break;
+default:
+DoAlert("3DMF texture: Unsupported kQ3PixelType");
+continue;
+}
 
-		int clampFlags = forceClampUVs ? kRendererTextureFlags_ClampBoth : 0;
-		if (textureShader->boundaryU == kQ3ShaderUVBoundaryClamp)
-			clampFlags |= kRendererTextureFlags_ClampU;
-		if (textureShader->boundaryV == kQ3ShaderUVBoundaryClamp)
-			clampFlags |= kRendererTextureFlags_ClampV;
+int clampFlags = forceClampUVs ? kRendererTextureFlags_ClampBoth : 0;
+if (textureShader->boundaryU == kQ3ShaderUVBoundaryClamp)
+clampFlags |= kRendererTextureFlags_ClampU;
+if (textureShader->boundaryV == kQ3ShaderUVBoundaryClamp)
+clampFlags |= kRendererTextureFlags_ClampV;
 
-		outTextureNames[i] = Render_LoadTexture(
-					 internalFormat,						// format in OpenGL
-					 textureShader->pixmap->width,			// width in pixels
-					 textureShader->pixmap->height,			// height in pixels
-					 format,								// what my format is
-					 type,									// size of each r,g,b
-					 textureShader->pixmap->image,			// pointer to the actual texture pixels
-					 clampFlags);
+outTextureNames[i] = Render_LoadTexture(
+internalFormat,
+textureShader->pixmap->width,
+textureShader->pixmap->height,
+format,
+type,
+textureShader->pixmap->image,
+clampFlags);
 
-		// Set glTextureName on meshes
-		for (int j = 0; j < metaFile->numMeshes; j++)
-		{
-			if (metaFile->meshes[j]->internalTextureID == i)
-			{
-				metaFile->meshes[j]->glTextureName = outTextureNames[i];
-				metaFile->meshes[j]->texturingMode = meshTexturingMode;
-			}
-		}
-	}
+for (int j = 0; j < metaFile->numMeshes; j++)
+{
+if (metaFile->meshes[j]->internalTextureID == i)
+{
+metaFile->meshes[j]->glTextureName = outTextureNames[i];
+metaFile->meshes[j]->texturingMode = meshTexturingMode;
+}
+}
+}
 }
 
 #pragma mark -
 
 void Render_StartFrame(void)
 {
-	bool didMakeCurrent = SDL_GL_MakeCurrent(gSDLWindow, gGLContext);
-	GAME_ASSERT_MESSAGE(didMakeCurrent, SDL_GetError());
+bool didMakeCurrent = SDL_GL_MakeCurrent(gSDLWindow, gGLContext);
+GAME_ASSERT_MESSAGE(didMakeCurrent, SDL_GetError());
 
-	// Clear rendering statistics
-	SDL_memset(&gRenderStats, 0, sizeof(gRenderStats));
+glUseProgram(gState.shaderProgram);
 
-	// Clear mesh queue
-	gMeshQueueSize = 0;
+// Clear rendering statistics
+SDL_memset(&gRenderStats, 0, sizeof(gRenderStats));
 
-	// Clear stats
-	gRenderStats.meshesPass1 = 0;
-	gRenderStats.meshesPass2 = 0;
-	gRenderStats.triangles = 0;
+// Clear mesh queue
+gMeshQueueSize = 0;
 
-	// Clear color & depth buffers.
-	SetFlag(glDepthMask, true);	// The depth mask must be re-enabled so we can clear the depth buffer.
+// The depth mask must be re-enabled so we can clear the depth buffer.
+SetFlag(glDepthMask, true);
 
-	GLbitfield clearWhat = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT;
+GLbitfield clearWhat = GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT;
 #if OSXPPC
-	// On PPC, bypass clear color in lawn levels (the cyc covers enough of the view)
-	if (gIsInGame && gLevelType == LEVEL_TYPE_LAWN && gCyclorama && gDebugMode != DEBUG_MODE_WIREFRAME)
-		clearWhat &= ~GL_COLOR_BUFFER_BIT;
+if (gIsInGame && gLevelType == LEVEL_TYPE_LAWN && gCyclorama && gDebugMode != DEBUG_MODE_WIREFRAME)
+clearWhat &= ~GL_COLOR_BUFFER_BIT;
 #endif
-	glClear(clearWhat);
+glClear(clearWhat);
 
-	GAME_ASSERT(gState.currentTransform == NULL);
-
-	GAME_ASSERT(!gFrameStarted);
-	gFrameStarted = true;
+GAME_ASSERT(gState.currentTransform == NULL);
+GAME_ASSERT(!gFrameStarted);
+gFrameStarted = true;
 }
 
 void Render_SetViewport(int x, int y, int w, int h)
 {
-	glViewport(x, y, w, h);
+glViewport(x, y, w, h);
 }
 
 void Render_FlushQueue(void)
 {
-	GAME_ASSERT(gFrameStarted);
+GAME_ASSERT(gFrameStarted);
 
-	// Nothing to draw?
-	if (gMeshQueueSize == 0)
-		return;
+if (gMeshQueueSize == 0)
+return;
 
-	//--------------------------------------------------------------
-	// SORT DRAW QUEUE ENTRIES
-	// Opaque meshes are sorted front-to-back,
-	// followed by transparent meshes, sorted back-to-front.
-	SDL_qsort(
-			gMeshQueuePtrs,
-			gMeshQueueSize,
-			sizeof(gMeshQueuePtrs[0]),
-			DrawOrderComparator
-	);
+//--------------------------------------------------------------
+// SORT DRAW QUEUE ENTRIES
+// Opaque meshes are sorted front-to-back,
+// followed by transparent meshes sorted back-to-front.
+SDL_qsort(
+gMeshQueuePtrs,
+gMeshQueueSize,
+sizeof(gMeshQueuePtrs[0]),
+DrawOrderComparator);
 
-	//--------------------------------------------------------------
-	// PASS 1: OPAQUE COLOR + DEPTH
-	// - Draw opaque meshes (pre-sorted front-to-back) to color AND depth buffers.
-	// - Draw transparent meshes (pre-sorted back-to-front after opaque meshes) to depth buffer only.
+//--------------------------------------------------------------
+// PASS 1: OPAQUE COLOR + DEPTH
+// Draw opaque meshes to color AND depth buffers.
+// Draw transparent meshes to depth buffer only (deferred).
 
-	int numDeferredColorMeshes = 0;
+int numDeferredColorMeshes = 0;
 
-	glDepthFunc(GL_LESS);
-	DisableState(GL_BLEND);
+glDepthFunc(GL_LESS);
+DisableState(GL_BLEND);
 
-	for (int i = 0; i < gMeshQueueSize; i++)
-	{
-		MeshQueueEntry* entry = gMeshQueuePtrs[i];
+for (int i = 0; i < gMeshQueueSize; i++)
+{
+MeshQueueEntry* entry = gMeshQueuePtrs[i];
 
-		if (!entry->meshIsTransparent)
-		{
-			// If the mesh is opaque, draw it now
-			BeginShadingPass(entry);
-			PrepareOpaqueShading(entry);
-			SendGeometry(entry);
-		}
-		else
-		{
-			// The mesh is transparent -- defer its color pass
-			GAME_ASSERT(numDeferredColorMeshes <= i);
-			gMeshQueuePtrs[numDeferredColorMeshes++] = entry;		// shoot back to start of queue for next pass
+if (!entry->meshIsTransparent)
+{
+BeginShadingPass(entry);
+PrepareOpaqueShading(entry);
+SendGeometry(entry);
+}
+else
+{
+// Defer color pass; shoot back to start of queue
+GAME_ASSERT(numDeferredColorMeshes <= i);
+gMeshQueuePtrs[numDeferredColorMeshes++] = entry;
 
-			// If a transparent mesh wants to write to the Z-buffer, do it now
-			if (!(entry->mods->statusBits & STATUS_BIT_NOZWRITE))
-			{
-				BeginDepthPass(entry);
-				SendGeometry(entry);
-			}
-		}
-	}
+// If the transparent mesh wants to write to Z, do it now
+if (!(entry->mods->statusBits & STATUS_BIT_NOZWRITE))
+{
+BeginDepthPass(entry);
+SendGeometry(entry);
+}
+}
+}
 
-	//--------------------------------------------------------------
-	// PASS 2: ALPHA-BLENDED COLOR
-	// - Draw transparent meshes to color buffer only
+//--------------------------------------------------------------
+// PASS 2: ALPHA-BLENDED COLOR
+// Draw transparent meshes to color buffer only.
 
-	gRenderStats.meshesPass2 += numDeferredColorMeshes;
+gRenderStats.meshesPass2 += numDeferredColorMeshes;
 
-	if (numDeferredColorMeshes > 0)
-	{
-		EnableState(GL_BLEND);
-		DisableState(GL_ALPHA_TEST);
-		SetFlag(glDepthMask, false);	// don't write to z buffer
-		glDepthFunc(GL_LEQUAL);			// LEQUAL: our meshes' depth info is already in the z buffer (written in pass 1)
+if (numDeferredColorMeshes > 0)
+{
+EnableState(GL_BLEND);
+gState.alphaTestEnabled = false;
+glUniform1i(gState.loc_u_AlphaTestEnabled, 0);
+SetFlag(glDepthMask, false);
+glDepthFunc(GL_LEQUAL);     // depth info already written in pass 1
 
-		for (int i = 0; i < numDeferredColorMeshes; i++)
-		{
-			const MeshQueueEntry* entry = gMeshQueuePtrs[i];
-			BeginShadingPass(entry);
-			PrepareAlphaShading(entry);
-			SendGeometry(entry);
-		}
-	}
+for (int i = 0; i < numDeferredColorMeshes; i++)
+{
+const MeshQueueEntry* entry = gMeshQueuePtrs[i];
+BeginShadingPass(entry);
+PrepareAlphaShading(entry);
+SendGeometry(entry);
+}
+}
 
-	//--------------------------------------------------------------
-	// CLEAN UP
+//--------------------------------------------------------------
+// CLEAN UP
 
-	// Clear mesh draw queue
-	gMeshQueueSize = 0;
+// Restore camera-only modelview if a per-object transform was left active
+if (gState.currentTransform != NULL)
+{
+UploadMatrix4x4(gState.loc_u_ModelView, &gCurrentModelView);
+UploadMatrix3x3NormalFromMV(&gCurrentModelView);
+gState.currentTransform = NULL;
+}
 
-	// Clear transform
-	if (NULL != gState.currentTransform)
-	{
-		glPopMatrix();
-		gState.currentTransform = NULL;
-	}
+gMeshQueueSize = 0;
 }
 
 void Render_EndFrame(void)
 {
-	GAME_ASSERT(gFrameStarted);
-
-	Render_FlushQueue();
-
-	gFrameStarted = false;
+GAME_ASSERT(gFrameStarted);
+Render_FlushQueue();
+gFrameStarted = false;
 }
 
 #pragma mark -
 
 static inline float WorldPointToDepth(const TQ3Point3D p)
 {
-	// This is a simplification of:
-	//
-	//     Q3Point3D_Transform(&p, &gCameraWorldToFrustumMatrix, &p);
-	//     return p.z;
-	//
-	// This is enough to give us an idea of the depth of a point relative to another.
-
+// Simplified depth estimation relative to the camera frustum.
 #define M(x,y) gCameraWorldToFrustumMatrix.value[x][y]
-	return p.x*M(0,2) + p.y*M(1,2) + p.z*M(2,2);
+return p.x*M(0,2) + p.y*M(1,2) + p.z*M(2,2);
 #undef M
 }
 
 static float GetDepth(
-		int						numMeshes,
-		TQ3TriMeshData**		meshList,
-		const TQ3Point3D*		centerCoord)
+int                 numMeshes,
+TQ3TriMeshData**    meshList,
+const TQ3Point3D*   centerCoord)
 {
-	if (centerCoord)
-	{
-		return WorldPointToDepth(*centerCoord);
-	}
-	else
-	{
-		// Average centers of all bounding boxes
-		float mult = (float) numMeshes / 2.0f;
-		TQ3Point3D center = (TQ3Point3D) { 0, 0, 0 };
-		for (int i = 0; i < numMeshes; i++)
-		{
-			center.x += (meshList[i]->bBox.min.x + meshList[i]->bBox.max.x) * mult;
-			center.y += (meshList[i]->bBox.min.y + meshList[i]->bBox.max.y) * mult;
-			center.z += (meshList[i]->bBox.min.z + meshList[i]->bBox.max.z) * mult;
-		}
-		return WorldPointToDepth(center);
-	}
+if (centerCoord)
+return WorldPointToDepth(*centerCoord);
+
+// Average centers of all bounding boxes
+float mult = (float) numMeshes / 2.0f;
+TQ3Point3D center = {0, 0, 0};
+for (int i = 0; i < numMeshes; i++)
+{
+center.x += (meshList[i]->bBox.min.x + meshList[i]->bBox.max.x) * mult;
+center.y += (meshList[i]->bBox.min.y + meshList[i]->bBox.max.y) * mult;
+center.z += (meshList[i]->bBox.min.z + meshList[i]->bBox.max.z) * mult;
+}
+return WorldPointToDepth(center);
 }
 
 static bool IsMeshTransparent(const TQ3TriMeshData* mesh, const RenderModifiers* mods)
 {
-	return	mesh->texturingMode == kQ3TexturingModeAlphaBlend
-			|| mesh->diffuseColor.a < .999f
-			|| mods->diffuseColor.a < .999f
-			|| mods->autoFadeFactor < .999f
-			|| (mods->statusBits & STATUS_BIT_GLOW)
-	;
+return  mesh->texturingMode == kQ3TexturingModeAlphaBlend
+|| mesh->diffuseColor.a < .999f
+|| mods->diffuseColor.a < .999f
+|| mods->autoFadeFactor < .999f
+|| (mods->statusBits & STATUS_BIT_GLOW);
 }
 
 static MeshQueueEntry* NewMeshQueueEntry(void)
 {
-	MeshQueueEntry* entry = &gMeshQueueEntryPool[gMeshQueueSize];
-	gMeshQueuePtrs[gMeshQueueSize] = entry;
-	gMeshQueueSize++;
-	return entry;
+MeshQueueEntry* entry = &gMeshQueueEntryPool[gMeshQueueSize];
+gMeshQueuePtrs[gMeshQueueSize] = entry;
+gMeshQueueSize++;
+return entry;
 }
 
 void Render_SubmitMeshList(
-		int						numMeshes,
-		TQ3TriMeshData**		meshList,
-		const TQ3Matrix4x4*		transform,
-		const RenderModifiers*	mods,
-		const TQ3Point3D*		centerCoord)
+int                     numMeshes,
+TQ3TriMeshData**        meshList,
+const TQ3Matrix4x4*     transform,
+const RenderModifiers*  mods,
+const TQ3Point3D*       centerCoord)
 {
-	if (numMeshes <= 0)
-		SDL_Log("not drawing this!\n");
+if (numMeshes <= 0)
+SDL_Log("not drawing this!\n");
 
-	GAME_ASSERT(gFrameStarted);
-	GAME_ASSERT(gMeshQueueSize + numMeshes <= MESHQUEUE_MAX_SIZE);
+GAME_ASSERT(gFrameStarted);
+GAME_ASSERT(gMeshQueueSize + numMeshes <= MESHQUEUE_MAX_SIZE);
 
-	float depth = GetDepth(numMeshes, meshList, centerCoord);
+float depth = GetDepth(numMeshes, meshList, centerCoord);
 
-	for (int i = 0; i < numMeshes; i++)
-	{
-		MeshQueueEntry* entry = NewMeshQueueEntry();
-		entry->mesh				= meshList[i];
-		entry->transform		= transform;
-		entry->mods				= mods ? mods : &kDefaultRenderMods;
-		entry->depth			= depth;
-		entry->meshIsTransparent= IsMeshTransparent(entry->mesh, entry->mods);
+for (int i = 0; i < numMeshes; i++)
+{
+MeshQueueEntry* entry       = NewMeshQueueEntry();
+entry->mesh                 = meshList[i];
+entry->transform            = transform;
+entry->mods                 = mods ? mods : &kDefaultRenderMods;
+entry->depth                = depth;
+entry->meshIsTransparent    = IsMeshTransparent(entry->mesh, entry->mods);
 
-		gRenderStats.meshesPass1++;
-		gRenderStats.triangles += entry->mesh->numTriangles;
+gRenderStats.meshesPass1++;
+gRenderStats.triangles += entry->mesh->numTriangles;
 
-		GAME_ASSERT(!(entry->mods->statusBits & STATUS_BIT_HIDDEN));
-	}
+GAME_ASSERT(!(entry->mods->statusBits & STATUS_BIT_HIDDEN));
+}
 }
 
 void Render_SubmitMesh(
-		const TQ3TriMeshData*	mesh,
-		const TQ3Matrix4x4*		transform,
-		const RenderModifiers*	mods,
-		const TQ3Point3D*		centerCoord)
+const TQ3TriMeshData*   mesh,
+const TQ3Matrix4x4*     transform,
+const RenderModifiers*  mods,
+const TQ3Point3D*       centerCoord)
 {
-	GAME_ASSERT(gFrameStarted);
-	GAME_ASSERT(gMeshQueueSize < MESHQUEUE_MAX_SIZE);
+GAME_ASSERT(gFrameStarted);
+GAME_ASSERT(gMeshQueueSize < MESHQUEUE_MAX_SIZE);
 
-	MeshQueueEntry* entry = NewMeshQueueEntry();
-	entry->mesh				= mesh;
-	entry->transform		= transform;
-	entry->mods				= mods ? mods : &kDefaultRenderMods;
-	entry->depth			= GetDepth(1, (TQ3TriMeshData **) &mesh, centerCoord);
-	entry->meshIsTransparent= IsMeshTransparent(entry->mesh, entry->mods);
+MeshQueueEntry* entry       = NewMeshQueueEntry();
+entry->mesh                 = mesh;
+entry->transform            = transform;
+entry->mods                 = mods ? mods : &kDefaultRenderMods;
+entry->depth                = GetDepth(1, (TQ3TriMeshData **) &mesh, centerCoord);
+entry->meshIsTransparent    = IsMeshTransparent(entry->mesh, entry->mods);
 
-	gRenderStats.meshesPass1++;
-	gRenderStats.triangles += entry->mesh->numTriangles;
+gRenderStats.meshesPass1++;
+gRenderStats.triangles += entry->mesh->numTriangles;
 
-	GAME_ASSERT(!(entry->mods->statusBits & STATUS_BIT_HIDDEN));
+GAME_ASSERT(!(entry->mods->statusBits & STATUS_BIT_HIDDEN));
 }
 
 #pragma mark -
 
 static int DrawOrderComparator(const void* a_void, const void* b_void)
 {
-	static const int AFirst		= -1;
-	static const int BFirst		= +1;
-	static const int DontCare	= 0;
+static const int AFirst   = -1;
+static const int BFirst   = +1;
+static const int DontCare =  0;
 
-	const MeshQueueEntry* a = *(MeshQueueEntry**) a_void;
-	const MeshQueueEntry* b = *(MeshQueueEntry**) b_void;
+const MeshQueueEntry* a = *(MeshQueueEntry**) a_void;
+const MeshQueueEntry* b = *(MeshQueueEntry**) b_void;
 
-	// First check manual priority
+// First check manual draw order
+if (a->mods->drawOrder < b->mods->drawOrder)    return AFirst;
+if (a->mods->drawOrder > b->mods->drawOrder)    return BFirst;
 
-	if (a->mods->drawOrder < b->mods->drawOrder)
-		return AFirst;
+// Opaque meshes before transparent meshes
+if (a->meshIsTransparent != b->meshIsTransparent)
+return b->meshIsTransparent ? AFirst : BFirst;
 
-	if (a->mods->drawOrder > b->mods->drawOrder)
-		return BFirst;
+// Opaque: front-to-back; transparent: back-to-front
+if (!a->meshIsTransparent)
+{
+if (a->depth < b->depth)    return AFirst;
+if (a->depth > b->depth)    return BFirst;
+}
+else
+{
+if (a->depth < b->depth)    return BFirst;
+if (a->depth > b->depth)    return AFirst;
+}
 
-	// A and B have the same manual priority
-	// Compare their transparencies (opaque meshes go first)
-
-	if (a->meshIsTransparent != b->meshIsTransparent)
-	{
-		return b->meshIsTransparent? AFirst: BFirst;
-	}
-
-	// A and B have the same manual priority AND transparency
-	// Compare their depths
-
-	if (!a->meshIsTransparent)					// both A and B are OPAQUE meshes: order them front-to-back
-	{
-		if (a->depth < b->depth)				// A is closer to the camera, draw it first
-			return AFirst;
-
-		if (a->depth > b->depth)				// B is closer to the camera, draw it first
-			return BFirst;
-	}
-	else										// both A and B are TRANSPARENT meshes: order them back-to-front
-	{
-		if (a->depth < b->depth)				// A is closer to the camera, draw it last
-			return BFirst;
-
-		if (a->depth > b->depth)				// B is closer to the camera, draw it last
-			return AFirst;
-	}
-
-	return DontCare;
+return DontCare;
 }
 
 #pragma mark -
 
 static void SendGeometry(const MeshQueueEntry* entry)
 {
-	uint32_t statusBits = entry->mods->statusBits;
+uint32_t statusBits = entry->mods->statusBits;
+const TQ3TriMeshData* mesh = entry->mesh;
 
-	const TQ3TriMeshData* mesh = entry->mesh;
+// Cull backfaces unless explicitly kept
+SetState(GL_CULL_FACE, !(statusBits & STATUS_BIT_KEEPBACKFACES));
 
-	// Cull backfaces or not
-	SetState(GL_CULL_FACE, !(statusBits & STATUS_BIT_KEEPBACKFACES));
+// Two-pass for transparent backfaces: draw backfaces first, then frontfaces
+if (statusBits & STATUS_BIT_KEEPBACKFACES_2PASS)
+glCullFace(GL_FRONT);       // pass 1: draw backfaces
 
-	// To keep backfaces on a transparent mesh, draw backfaces first, then frontfaces.
-	// This enhances the appearance of e.g. translucent spheres,
-	// without the need to depth-sort individual faces.
-	if (statusBits & STATUS_BIT_KEEPBACKFACES_2PASS)
-		glCullFace(GL_FRONT);		// Pass 1: draw backfaces (cull frontfaces)
+// Submit vertex positions
+glVertexAttribPointer(gState.loc_a_Position, 3, GL_FLOAT, GL_FALSE, 0, mesh->points);
 
-	// Submit vertex data
-	glVertexPointer(3, GL_FLOAT, 0, mesh->points);
+// Upload combined modelview if the per-object transform changed
+if (gState.currentTransform != entry->transform)
+{
+if (entry->transform)
+{
+TQ3Matrix4x4 combined;
+Q3Matrix4x4_Multiply(&gCurrentModelView, entry->transform, &combined);
+UploadMatrix4x4(gState.loc_u_ModelView, &combined);
+UploadMatrix3x3NormalFromMV(&combined);
+}
+else
+{
+UploadMatrix4x4(gState.loc_u_ModelView, &gCurrentModelView);
+UploadMatrix3x3NormalFromMV(&gCurrentModelView);
+}
+gState.currentTransform = entry->transform;
+}
 
-	// Submit transformation matrix if any
-	if (gState.currentTransform != entry->transform)
-	{
-		if (gState.currentTransform)	// nuke old transform
-			glPopMatrix();
+glDrawElements(GL_TRIANGLES, mesh->numTriangles * 3, GL_UNSIGNED_INT, mesh->triangles);
+CHECK_GL_ERROR();
 
-		if (entry->transform)			// apply new transform
-		{
-			glPushMatrix();
-			glMultMatrixf((float*)entry->transform->value);
-		}
-
-		gState.currentTransform = entry->transform;
-	}
-
-	// Draw the mesh
-	glDrawElements(GL_TRIANGLES, mesh->numTriangles*3, GL_UNSIGNED_INT, mesh->triangles);
-	CHECK_GL_ERROR();
-
-	// Pass 2 to draw transparent meshes without face culling (see above for an explanation)
-	if (statusBits & STATUS_BIT_KEEPBACKFACES_2PASS)
-	{
-		// Restored glCullFace to GL_BACK, which is the default for all other meshes.
-		glCullFace(GL_BACK);	// pass 2: draw frontfaces (cull backfaces)
-
-		// Draw the mesh again
-		glDrawElements(GL_TRIANGLES, mesh->numTriangles * 3, GL_UNSIGNED_INT, mesh->triangles);
-		CHECK_GL_ERROR();
-	}
+// Pass 2: draw frontfaces (improves look of translucent spheres etc.)
+if (statusBits & STATUS_BIT_KEEPBACKFACES_2PASS)
+{
+glCullFace(GL_BACK);        // pass 2: draw frontfaces
+glDrawElements(GL_TRIANGLES, mesh->numTriangles * 3, GL_UNSIGNED_INT, mesh->triangles);
+CHECK_GL_ERROR();
+}
 }
 
 static void BeginDepthPass(const MeshQueueEntry* entry)
 {
-	const TQ3TriMeshData* mesh = entry->mesh;
-	uint32_t statusBits = entry->mods->statusBits;
+const TQ3TriMeshData* mesh = entry->mesh;
 
-	GAME_ASSERT(!(statusBits & STATUS_BIT_NOZWRITE));		// assume nozwrite objects were filtered out
+GAME_ASSERT(!(entry->mods->statusBits & STATUS_BIT_NOZWRITE));
 
-	// Never write to color buffer in this pass
-	SetColorMask(GL_FALSE);
+// Never write to color buffer in this pass
+SetColorMask(GL_FALSE);
+SetFlag(glDepthMask, true);
+EnableState(GL_DEPTH_TEST);
 
-	// Always write to depth buffer in this pass
-	SetFlag(glDepthMask, true);
+// No lighting or fog needed for depth-only pass
+SetUniformBool(gState.loc_u_LightingEnabled, &gState.lightingEnabled, false);
+SetUniformBool(gState.loc_u_FogEnabled,      &gState.fogEnabled,      false);
+SetUniformBool(gState.loc_u_UseVertexColors, &gState.useVertexColors, false);
+glUniform4f(gState.loc_u_DiffuseColor, 1, 1, 1, 1);
 
-	glColor4f(1,1,1,1);
-	DisableClientState(GL_COLOR_ARRAY);
-	DisableClientState(GL_NORMAL_ARRAY);
-	EnableState(GL_DEPTH_TEST);
+DisableAttrib(Normal);
+DisableAttrib(Color);
 
-	DisableState(GL_LIGHTING);
-	DisableState(GL_FOG);
-
-	// Texture mapping
-	if (gDebugMode != DEBUG_MODE_NOTEXTURES &&
-			(mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask) != kQ3TexturingModeOff)
-	{
-		GAME_ASSERT(mesh->vertexUVs);
-
-		EnableState(GL_ALPHA_TEST);
-		EnableState(GL_TEXTURE_2D);
-		EnableClientState(GL_TEXTURE_COORD_ARRAY);
-		Render_BindTexture(mesh->glTextureName);
-		glTexCoordPointer(2, GL_FLOAT, 0, mesh->vertexUVs);
-		CHECK_GL_ERROR();
-	}
-	else
-	{
-		DisableState(GL_ALPHA_TEST);
-		DisableState(GL_TEXTURE_2D);
-		DisableClientState(GL_TEXTURE_COORD_ARRAY);
-		CHECK_GL_ERROR();
-	}
+if (gDebugMode != DEBUG_MODE_NOTEXTURES &&
+(mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask) != kQ3TexturingModeOff)
+{
+SetUniformBool(gState.loc_u_TextureEnabled,   &gState.textureEnabled,   true);
+SetUniformBool(gState.loc_u_AlphaTestEnabled, &gState.alphaTestEnabled, true);
+EnableAttrib(TexCoord);
+Render_BindTexture(mesh->glTextureName);
+glVertexAttribPointer(gState.loc_a_TexCoord, 2, GL_FLOAT, GL_FALSE, 0, mesh->vertexUVs);
+CHECK_GL_ERROR();
+}
+else
+{
+SetUniformBool(gState.loc_u_TextureEnabled,   &gState.textureEnabled,   false);
+SetUniformBool(gState.loc_u_AlphaTestEnabled, &gState.alphaTestEnabled, false);
+DisableAttrib(TexCoord);
+}
 }
 
 static void BeginShadingPass(const MeshQueueEntry* entry)
 {
-	const TQ3TriMeshData* mesh = entry->mesh;
-	uint32_t statusBits = entry->mods->statusBits;
+const TQ3TriMeshData* mesh = entry->mesh;
+uint32_t statusBits = entry->mods->statusBits;
 
-	// Always write to color mask in this pass
-	SetColorMask(GL_TRUE);
+// Always write to color buffer in this pass
+SetColorMask(GL_TRUE);
 
-	// Environment map effect
-	if (statusBits & STATUS_BIT_REFLECTIONMAP)
-		EnvironmentMapTriMesh(mesh, entry->transform);
+// Environment map effect
+if (statusBits & STATUS_BIT_REFLECTIONMAP)
+EnvironmentMapTriMesh(mesh, entry->transform);
 
-	// Apply gouraud or null illumination
-	SetState(GL_LIGHTING,
-			!( (statusBits & STATUS_BIT_NULLSHADER) || (mesh->texturingMode & kQ3TexturingModeExt_NullShaderFlag) ));
+// Lighting
+bool wantLighting = !((statusBits & STATUS_BIT_NULLSHADER)
+|| (mesh->texturingMode & kQ3TexturingModeExt_NullShaderFlag));
+SetUniformBool(gState.loc_u_LightingEnabled, &gState.lightingEnabled, wantLighting);
 
-	// Apply fog or not
-	SetState(GL_FOG, gState.sceneHasFog && !(statusBits & STATUS_BIT_NOFOG));
+// Fog
+bool wantFog = gState.sceneHasFog && !(statusBits & STATUS_BIT_NOFOG);
+SetUniformBool(gState.loc_u_FogEnabled, &gState.fogEnabled, wantFog);
 
-	// Texture mapping
-	if (gDebugMode != DEBUG_MODE_NOTEXTURES &&
-			(mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask) != kQ3TexturingModeOff)
-	{
-		EnableState(GL_TEXTURE_2D);
-		EnableClientState(GL_TEXTURE_COORD_ARRAY);
-		Render_BindTexture(mesh->glTextureName);
-		glTexCoordPointer(2, GL_FLOAT, 0, (statusBits & STATUS_BIT_REFLECTIONMAP) ? gEnvMapUVs: mesh->vertexUVs);
-		CHECK_GL_ERROR();
-	}
-	else
-	{
-		DisableState(GL_TEXTURE_2D);
-		DisableClientState(GL_TEXTURE_COORD_ARRAY);
-		CHECK_GL_ERROR();
-	}
+// Texture mapping
+if (gDebugMode != DEBUG_MODE_NOTEXTURES &&
+(mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask) != kQ3TexturingModeOff)
+{
+SetUniformBool(gState.loc_u_TextureEnabled, &gState.textureEnabled, true);
+EnableAttrib(TexCoord);
+Render_BindTexture(mesh->glTextureName);
+const float* uvs = (const float*)(statusBits & STATUS_BIT_REFLECTIONMAP ? gEnvMapUVs : mesh->vertexUVs);
+glVertexAttribPointer(gState.loc_a_TexCoord, 2, GL_FLOAT, GL_FALSE, 0, uvs);
+CHECK_GL_ERROR();
+}
+else
+{
+SetUniformBool(gState.loc_u_TextureEnabled, &gState.textureEnabled, false);
+DisableAttrib(TexCoord);
+}
 
-	// Submit normal data if any
-	if (mesh->hasVertexNormals && !(statusBits & STATUS_BIT_NULLSHADER))
-	{
-		EnableClientState(GL_NORMAL_ARRAY);
-		glNormalPointer(GL_FLOAT, 0, mesh->vertexNormals);
-	}
-	else
-	{
-		DisableClientState(GL_NORMAL_ARRAY);
-	}
+// Normal data (only when lighting is active)
+if (mesh->hasVertexNormals && wantLighting)
+{
+EnableAttrib(Normal);
+glVertexAttribPointer(gState.loc_a_Normal, 3, GL_FLOAT, GL_FALSE, 0, mesh->vertexNormals);
+}
+else
+{
+DisableAttrib(Normal);
+}
 }
 
 static void PrepareOpaqueShading(const MeshQueueEntry* entry)
 {
-	const TQ3TriMeshData* mesh = entry->mesh;
-	const uint32_t statusBits = entry->mods->statusBits;
+const TQ3TriMeshData* mesh = entry->mesh;
+const uint32_t statusBits  = entry->mods->statusBits;
+TQ3TexturingMode texMode   = (mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask);
 
-	TQ3TexturingMode texturingMode = (mesh->texturingMode & kQ3TexturingModeExt_OpacityModeMask);
+SetFlag(glDepthMask, !(statusBits & STATUS_BIT_NOZWRITE));
 
-	// Write to z-buffer
-	SetFlag(glDepthMask, !(statusBits & STATUS_BIT_NOZWRITE));
+bool wantAlphaTest = (texMode == kQ3TexturingModeAlphaTest);
+SetUniformBool(gState.loc_u_AlphaTestEnabled, &gState.alphaTestEnabled, wantAlphaTest);
 
-	// Enable alpha testing if the mesh's texture calls for it
-	SetState(GL_ALPHA_TEST, texturingMode == kQ3TexturingModeAlphaTest);
-
-	// Per-vertex colors
-	if (mesh->hasVertexColors)
-	{
-		EnableClientState(GL_COLOR_ARRAY);
-
-		glColorPointer(4, GL_FLOAT, 0, mesh->vertexColors);
-	}
-	else
-	{
-		DisableClientState(GL_COLOR_ARRAY);
-
-		// Apply diffuse color for the entire mesh
-		glColor4f(
-				mesh->diffuseColor.r * entry->mods->diffuseColor.r,
-				mesh->diffuseColor.g * entry->mods->diffuseColor.g,
-				mesh->diffuseColor.b * entry->mods->diffuseColor.b,
-				1.0f);
-	}
+if (mesh->hasVertexColors)
+{
+SetUniformBool(gState.loc_u_UseVertexColors, &gState.useVertexColors, true);
+EnableAttrib(Color);
+glVertexAttribPointer(gState.loc_a_Color, 4, GL_FLOAT, GL_FALSE, 0, mesh->vertexColors);
+}
+else
+{
+SetUniformBool(gState.loc_u_UseVertexColors, &gState.useVertexColors, false);
+DisableAttrib(Color);
+glUniform4f(gState.loc_u_DiffuseColor,
+mesh->diffuseColor.r * entry->mods->diffuseColor.r,
+mesh->diffuseColor.g * entry->mods->diffuseColor.g,
+mesh->diffuseColor.b * entry->mods->diffuseColor.b,
+1.0f);
+}
 }
 
 static void PrepareAlphaShading(const MeshQueueEntry* entry)
 {
-	const TQ3TriMeshData* mesh = entry->mesh;
-	const uint32_t statusBits = entry->mods->statusBits;
+const TQ3TriMeshData* mesh = entry->mesh;
+const uint32_t statusBits  = entry->mods->statusBits;
 
-	// Set additive alpha blending or not
-	bool wantAdditive = !!(statusBits & STATUS_BIT_GLOW);
-	if (gState.blendFuncIsAdditive != wantAdditive)
-	{
-		if (wantAdditive)
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE);
-		else
-			glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-		gState.blendFuncIsAdditive = wantAdditive;
-	}
+// Additive blending for glow meshes
+bool wantAdditive = !!(statusBits & STATUS_BIT_GLOW);
+if (gState.blendFuncIsAdditive != wantAdditive)
+{
+if (wantAdditive)
+glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+else
+glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+gState.blendFuncIsAdditive = wantAdditive;
+}
 
-	// Per-vertex colors
-	if (mesh->hasVertexColors)
-	{
-		EnableClientState(GL_COLOR_ARRAY);
+if (mesh->hasVertexColors)
+{
+SetUniformBool(gState.loc_u_UseVertexColors, &gState.useVertexColors, true);
+EnableAttrib(Color);
 
-		// OpenGL ignores diffuse color (used for transparency) if we also send
-		// per-vertex colors. So, apply transparency to the per-vertex color array.
-		GAME_ASSERT(4 * mesh->numPoints <= (int)(sizeof(gBackupVertexColors) / sizeof(gBackupVertexColors[0])));
-		int j = 0;
-		for (int v = 0; v < mesh->numPoints; v++)
-		{
-			gBackupVertexColors[j++] = mesh->vertexColors[v].r;
-			gBackupVertexColors[j++] = mesh->vertexColors[v].g;
-			gBackupVertexColors[j++] = mesh->vertexColors[v].b;
-			gBackupVertexColors[j++] = mesh->vertexColors[v].a * entry->mods->autoFadeFactor;
-		}
-
-		glColorPointer(4, GL_FLOAT, 0, gBackupVertexColors);
-	}
-	else
-	{
-		DisableClientState(GL_COLOR_ARRAY);
-
-		// Apply diffuse color for the entire mesh
-		glColor4f(
-				mesh->diffuseColor.r * entry->mods->diffuseColor.r,
-				mesh->diffuseColor.g * entry->mods->diffuseColor.g,
-				mesh->diffuseColor.b * entry->mods->diffuseColor.b,
-				mesh->diffuseColor.a * entry->mods->diffuseColor.a * entry->mods->autoFadeFactor);
-	}
+// Bake autoFadeFactor into the per-vertex alpha channel
+GAME_ASSERT(4 * mesh->numPoints <= (int)(sizeof(gBackupVertexColors) / sizeof(gBackupVertexColors[0])));
+int j = 0;
+for (int v = 0; v < mesh->numPoints; v++)
+{
+gBackupVertexColors[j++] = mesh->vertexColors[v].r;
+gBackupVertexColors[j++] = mesh->vertexColors[v].g;
+gBackupVertexColors[j++] = mesh->vertexColors[v].b;
+gBackupVertexColors[j++] = mesh->vertexColors[v].a * entry->mods->autoFadeFactor;
+}
+glVertexAttribPointer(gState.loc_a_Color, 4, GL_FLOAT, GL_FALSE, 0, gBackupVertexColors);
+}
+else
+{
+SetUniformBool(gState.loc_u_UseVertexColors, &gState.useVertexColors, false);
+DisableAttrib(Color);
+glUniform4f(gState.loc_u_DiffuseColor,
+mesh->diffuseColor.r * entry->mods->diffuseColor.r,
+mesh->diffuseColor.g * entry->mods->diffuseColor.g,
+mesh->diffuseColor.b * entry->mods->diffuseColor.b,
+mesh->diffuseColor.a * entry->mods->diffuseColor.a * entry->mods->autoFadeFactor);
+}
 }
 
 void Render_ResetColor(void)
 {
-	DisableState(GL_BLEND);
-	DisableState(GL_ALPHA_TEST);
-	DisableState(GL_LIGHTING);
-	DisableState(GL_TEXTURE_2D);
-	DisableClientState(GL_NORMAL_ARRAY);
-	DisableClientState(GL_COLOR_ARRAY);
-	glColor4f(1, 1, 1, 1);
+DisableState(GL_BLEND);
+SetUniformBool(gState.loc_u_AlphaTestEnabled, &gState.alphaTestEnabled, false);
+SetUniformBool(gState.loc_u_LightingEnabled,  &gState.lightingEnabled,  false);
+SetUniformBool(gState.loc_u_TextureEnabled,   &gState.textureEnabled,   false);
+DisableAttrib(Normal);
+DisableAttrib(Color);
+glUniform4f(gState.loc_u_DiffuseColor, 1, 1, 1, 1);
 }
 
 #pragma mark -
@@ -1048,81 +1367,111 @@ void Render_ResetColor(void)
 //=======================================================================================================
 
 TQ3Vector2D FitRectKeepAR(
-	int logicalWidth,
-	int logicalHeight,
-	float displayWidth,
-	float displayHeight)
+int logicalWidth,
+int logicalHeight,
+float displayWidth,
+float displayHeight)
 {
-	float displayAR = (float)displayWidth / (float)displayHeight;
-	float logicalAR = (float)logicalWidth / (float)logicalHeight;
+float displayAR = (float) displayWidth  / (float) displayHeight;
+float logicalAR = (float) logicalWidth  / (float) logicalHeight;
 
-	if (displayAR >= logicalAR)
-	{
-		return (TQ3Vector2D) { displayHeight * logicalAR, displayHeight };
-	}
-	else
-	{
-		return (TQ3Vector2D) { displayWidth, displayWidth / logicalAR };
-	}
+if (displayAR >= logicalAR)
+return (TQ3Vector2D) { displayHeight * logicalAR, displayHeight };
+else
+return (TQ3Vector2D) { displayWidth, displayWidth / logicalAR };
 }
 
 /****************************/
-/*    2D    */
+/*    2D MODE               */
 /****************************/
+
+static void MakeOrthoMatrix(
+TQ3Matrix4x4* m,
+float left, float right,
+float bottom, float top,
+float nearZ, float farZ)
+{
+float rl = right - left;
+float tb = top   - bottom;
+float fn = farZ  - nearZ;
+SDL_memset(m->value, 0, sizeof(m->value));
+m->value[0][0] =  2.0f / rl;
+m->value[1][1] =  2.0f / tb;
+m->value[2][2] = -2.0f / fn;
+m->value[3][0] = -(right + left)   / rl;
+m->value[3][1] = -(top   + bottom) / tb;
+m->value[3][2] = -(farZ  + nearZ)  / fn;
+m->value[3][3] = 1.0f;
+}
+
+static void MakeIdentityMatrix(TQ3Matrix4x4* m)
+{
+SDL_memset(m->value, 0, sizeof(m->value));
+m->value[0][0] = m->value[1][1] = m->value[2][2] = m->value[3][3] = 1.0f;
+}
 
 void Render_Enter2D_Full640x480(void)
 {
-	if (gGamePrefs.force4x3AspectRatio)
-	{
-		TQ3Vector2D fitted = FitRectKeepAR(GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT, gWindowWidth, gWindowHeight);
-		glViewport(
-			(GLint) (0.5f * (gWindowWidth - fitted.x)),
-			(GLint) (0.5f * (gWindowHeight - fitted.y)),
-			(GLint) ceilf(fitted.x),
-			(GLint) ceilf(fitted.y));
-	}
-	else
-	{
-		glViewport(0, 0, gWindowWidth, gWindowHeight);
-	}
+if (gGamePrefs.force4x3AspectRatio)
+{
+TQ3Vector2D fitted = FitRectKeepAR(GAME_VIEW_WIDTH, GAME_VIEW_HEIGHT, gWindowWidth, gWindowHeight);
+glViewport(
+(GLint) (0.5f * (gWindowWidth  - fitted.x)),
+(GLint) (0.5f * (gWindowHeight - fitted.y)),
+(GLint) ceilf(fitted.x),
+(GLint) ceilf(fitted.y));
+}
+else
+{
+glViewport(0, 0, gWindowWidth, gWindowHeight);
+}
 
-	glMatrixMode(GL_PROJECTION);
-	glPushMatrix();
-	glLoadIdentity();
-	glOrtho(0,640,480,0,0,1000);
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glLoadIdentity();
+GAME_ASSERT(gMatrixStackTop < MATRIX_STACK_DEPTH);
+gProjectionStack[gMatrixStackTop] = gCurrentProjection;
+gModelViewStack[gMatrixStackTop]  = gCurrentModelView;
+gMatrixStackTop++;
+
+TQ3Matrix4x4 proj, mv;
+MakeOrthoMatrix(&proj, 0, 640, 480, 0, 0, 1000);
+MakeIdentityMatrix(&mv);
+Render_SetProjectionMatrix(&proj);
+Render_SetModelViewMatrix(&mv);
 }
 
 void Render_Enter2D_NormalizedCoordinates(float aspect)
 {
-	glMatrixMode(GL_PROJECTION);
-	glPushMatrix();
-	glLoadIdentity();
-	glOrtho(-aspect, aspect, -1, 1, 0, 1000);
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glLoadIdentity();
+GAME_ASSERT(gMatrixStackTop < MATRIX_STACK_DEPTH);
+gProjectionStack[gMatrixStackTop] = gCurrentProjection;
+gModelViewStack[gMatrixStackTop]  = gCurrentModelView;
+gMatrixStackTop++;
+
+TQ3Matrix4x4 proj, mv;
+MakeOrthoMatrix(&proj, -aspect, aspect, -1, 1, 0, 1000);
+MakeIdentityMatrix(&mv);
+Render_SetProjectionMatrix(&proj);
+Render_SetModelViewMatrix(&mv);
 }
 
 void Render_Enter2D_NativeResolution(void)
 {
-	glMatrixMode(GL_PROJECTION);
-	glPushMatrix();
-	glLoadIdentity();
-	glOrtho(0, gWindowWidth, gWindowHeight, 0, 0, 1000);
-	glMatrixMode(GL_MODELVIEW);
-	glPushMatrix();
-	glLoadIdentity();
+GAME_ASSERT(gMatrixStackTop < MATRIX_STACK_DEPTH);
+gProjectionStack[gMatrixStackTop] = gCurrentProjection;
+gModelViewStack[gMatrixStackTop]  = gCurrentModelView;
+gMatrixStackTop++;
+
+TQ3Matrix4x4 proj, mv;
+MakeOrthoMatrix(&proj, 0, gWindowWidth, gWindowHeight, 0, 0, 1000);
+MakeIdentityMatrix(&mv);
+Render_SetProjectionMatrix(&proj);
+Render_SetModelViewMatrix(&mv);
 }
 
 void Render_Exit2D(void)
 {
-	glMatrixMode(GL_PROJECTION);
-	glPopMatrix();
-	glMatrixMode(GL_MODELVIEW);
-	glPopMatrix();
+GAME_ASSERT(gMatrixStackTop > 0);
+gMatrixStackTop--;
+Render_SetProjectionMatrix(&gProjectionStack[gMatrixStackTop]);
+Render_SetModelViewMatrix(&gModelViewStack[gMatrixStackTop]);
 }
 
 #pragma mark -
@@ -1135,48 +1484,36 @@ void Render_Exit2D(void)
 
 void Render_DrawFadeOverlay(float opacity)
 {
-	GAME_ASSERT(gFullscreenQuad);
-
-	gFullscreenQuad->texturingMode = kQ3TexturingModeOff;
-	gFullscreenQuad->diffuseColor = (TQ3ColorRGBA) { 0,0,0,1.0f-opacity };
-
-	Render_SubmitMesh(gFullscreenQuad, NULL, &kDefaultRenderMods_FadeOverlay, &kQ3Point3D_Zero);
+GAME_ASSERT(gFullscreenQuad);
+gFullscreenQuad->texturingMode = kQ3TexturingModeOff;
+gFullscreenQuad->diffuseColor  = (TQ3ColorRGBA) { 0, 0, 0, 1.0f - opacity };
+Render_SubmitMesh(gFullscreenQuad, NULL, &kDefaultRenderMods_FadeOverlay, &kQ3Point3D_Zero);
 }
 
 #pragma mark -
 
 TQ3Area Render_GetAdjustedViewportRect(Rect paneClip, int logicalWidth, int logicalHeight)
 {
-	float scaleX;
-	float scaleY;
-	float xoff = 0;
-	float yoff = 0;
+float scaleX, scaleY, xoff = 0, yoff = 0;
 
-	if (!gGamePrefs.force4x3AspectRatio)
-	{
-		scaleX = gWindowWidth / (float)logicalWidth;	// scale clip pane to window size
-		scaleY = gWindowHeight / (float)logicalHeight;
-	}
-	else
-	{
-		TQ3Vector2D fitted = FitRectKeepAR(logicalWidth, logicalHeight, gWindowWidth, gWindowHeight);
-		xoff = (gWindowWidth - fitted.x) * 0.5f;
-		yoff = (gWindowHeight - fitted.y) * 0.5f;
-		scaleX = fitted.x / (float)logicalWidth;
-		scaleY = fitted.y / (float)logicalHeight;
-	}
+if (!gGamePrefs.force4x3AspectRatio)
+{
+scaleX = gWindowWidth  / (float) logicalWidth;
+scaleY = gWindowHeight / (float) logicalHeight;
+}
+else
+{
+TQ3Vector2D fitted = FitRectKeepAR(logicalWidth, logicalHeight, gWindowWidth, gWindowHeight);
+xoff   = (gWindowWidth  - fitted.x) * 0.5f;
+yoff   = (gWindowHeight - fitted.y) * 0.5f;
+scaleX = fitted.x / (float) logicalWidth;
+scaleY = fitted.y / (float) logicalHeight;
+}
 
-	float left   = xoff + scaleX * paneClip.left;
-	float right  = xoff + scaleX * (logicalWidth - paneClip.right);
-	float top    = yoff + scaleY * paneClip.top;
-	float bottom = yoff + scaleY * (logicalHeight - paneClip.bottom);
+float left   = floorf(xoff + scaleX * paneClip.left);
+float right  = ceilf (xoff + scaleX * (logicalWidth  - paneClip.right));
+float top    = floorf(yoff + scaleY * paneClip.top);
+float bottom = ceilf (yoff + scaleY * (logicalHeight - paneClip.bottom));
 
-	// Floor min to avoid seam at edges of HUD if scale ratio is dirty
-	left = floorf(left);
-	top = floorf(top);
-	// Ceil max to avoid seam at edges of HUD if scale ratio is dirty
-	right = ceilf(right);
-	bottom = ceilf(bottom);
-
-	return (TQ3Area) {{left,top},{right,bottom}};
+return (TQ3Area) {{left, top}, {right, bottom}};
 }

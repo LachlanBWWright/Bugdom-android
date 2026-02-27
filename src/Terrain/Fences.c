@@ -361,6 +361,9 @@ TQ3Vector2D		lineNormal;
 double			radius;
 double			oldX,oldZ,newX,newZ;
 
+	if (gNoFenceCollision)			// fence collision disabled (cheat/dev mode)
+		return;
+
 	letGoOver = false;
 
 			/* CALC MY MOTION LINE SEGMENT */
