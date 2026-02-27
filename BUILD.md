@@ -43,7 +43,7 @@ To build Bugdom for WebAssembly and test it in a browser:
     ```
     Then open http://localhost:8000/ in your browser.
 
-The WebAssembly build is automatically deployed to [GitHub Pages](https://lachlanbwwright.github.io/Bugdom-android/) on every push to the `main` branch via GitHub Actions.
+The WebAssembly build is automatically deployed to [GitHub Pages](https://lachlanbwwright.github.io/Bugdom-android/) on every push to the `master` branch via GitHub Actions.
 
 ---
 

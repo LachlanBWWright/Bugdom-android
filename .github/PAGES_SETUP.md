@@ -8,7 +8,7 @@ The `.github/workflows/WebAssemblyBuild.yml` workflow automatically:
 
 1. **Builds the WebAssembly version** using Emscripten
 2. **Tests the build** in a headless browser using Playwright
-3. **Deploys to GitHub Pages** (only on the `main` branch)
+3. **Deploys to GitHub Pages** (only on the `master` branch)
 4. **Creates a release** with the WebAssembly artifacts
 
 ## Enabling GitHub Pages
@@ -20,7 +20,7 @@ To enable GitHub Pages for your fork:
 3. Under **Source**, select **GitHub Actions**
 4. Save the changes
 
-Once enabled, every push to the `main` branch will trigger a new deployment.
+Once enabled, every push to the `master` branch will trigger a new deployment.
 
 The site will be available at: `https://[your-username].github.io/[repo-name]/`
 
@@ -111,7 +111,7 @@ See the landing page for more details on the JavaScript API.
 - Check the workflow logs for specific error messages
 
 ### Deployment Doesn't Start
-- Ensure you're pushing to the `main` branch
+- Ensure you're pushing to the `master` branch
 - Verify GitHub Pages is enabled in repository settings
 - Check workflow permissions are correctly set
 
@@ -128,7 +128,7 @@ If you need to manually trigger a deployment:
 1. Go to **Actions** tab in your repository
 2. Select **WebAssembly Build and Deploy** workflow
 3. Click **Run workflow**
-4. Select the branch (should be `main`)
+4. Select the branch (should be `master`)
 5. Click **Run workflow** button
 
 ## Related Files
