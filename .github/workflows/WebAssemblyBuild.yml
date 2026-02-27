@@ -82,7 +82,7 @@ jobs:
   deploy-pages:
     needs: build-wasm
     runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/master'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -94,7 +94,7 @@ jobs:
   release-wasm:
     needs: build-wasm
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/master'
     steps:
       - uses: actions/checkout@v4
 
@@ -126,7 +126,7 @@ jobs:
           body: |
             ## Bugdom WebAssembly Build
 
-            This release contains the latest WebAssembly build of Bugdom, automatically built from the `main` branch.
+            This release contains the latest WebAssembly build of Bugdom, automatically built from the `master` branch.
 
             **Play online:** See the [GitHub Pages site](https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/)
 

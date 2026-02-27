@@ -5,6 +5,8 @@ This version, at https://github.com/jorio/bugdom, is approved by Pangea Software
 
 **Download the game for macOS, Windows and Linux here:** https://github.com/jorio/bugdom/releases
 
+**Play the WebAssembly version in your browser:** https://lachlanbwwright.github.io/Bugdom-android/
+
 ![Bugdom Screenshot](docs/screenshot.webp)
 
 ## About this port
