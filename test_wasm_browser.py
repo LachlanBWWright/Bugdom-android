@@ -81,15 +81,15 @@ async def run_test(url: str) -> bool:
         print("Waiting for data download...")
         try:
             await page.wait_for_function(
-                "!document.getElementById('progress-container').classList.contains('visible') || "
-                "document.getElementById('status-bar').textContent.includes('Running')",
+                "document.getElementById('loading-card')?.style.display === 'none' || "
+                "document.getElementById('status-text')?.textContent?.includes('Running')",
                 timeout=90000
             )
         except Exception:
             pass  # proceed anyway; data may still be in-flight
 
-        status = await page.evaluate("document.getElementById('status-bar')?.textContent ?? ''")
-        print(f"Status bar: {status}")
+        status = await page.evaluate("document.getElementById('status-text')?.textContent ?? ''")
+        print(f"Status text: {status}")
 
         if real_errors:
             print("ERRORS before game start:")
@@ -97,8 +97,8 @@ async def run_test(url: str) -> bool:
                 print(f"  {e}")
 
         # --- Start game ---
-        print("Starting game (clicking overlay)...")
-        await page.evaluate("document.getElementById('overlay')?.click()")
+        print("Starting game (clicking loading card)...")
+        await page.evaluate("document.getElementById('loading-card')?.click()")
 
         # --- Wait for first non-black rendered pixel (up to 30s) ---
         print("Waiting for rendered pixels (up to 30s)...")
