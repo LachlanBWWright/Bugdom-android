@@ -244,6 +244,7 @@
       <button class="btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
       <button class="btn" id="btn-mute" onclick="toggleMute()">🔊 Unmute</button>
       <button class="btn" id="btn-fence">✓ Fences On</button>
+      <button class="btn" id="btn-dev" onclick="toggleDevPanel()">🛠 Dev Tools</button>
     </div>
   </div>
 
@@ -393,6 +394,8 @@
           if (new URLSearchParams(window.location.search).has('dev')) {
             var panel = document.getElementById('api-panel');
             if (panel) panel.style.display = '';
+            var devBtn = document.getElementById('btn-dev');
+            if (devBtn) devBtn.className = 'btn on';
           }
 
           // Apply URL parameters
@@ -549,6 +552,15 @@
         }
       } catch (e) { /* ignore */ }
       if (btn) btn.textContent = _muted ? '🔇 Muted' : '🔊 Unmute';
+    }
+
+    function toggleDevPanel() {
+      var panel = document.getElementById('api-panel');
+      if (!panel) return;
+      var visible = panel.style.display !== 'none';
+      panel.style.display = visible ? 'none' : '';
+      var btn = document.getElementById('btn-dev');
+      if (btn) btn.className = 'btn' + (visible ? '' : ' on');
     }
 
     // Periodically update current level display
