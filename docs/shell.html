@@ -222,7 +222,7 @@
            onerror="this.style.display='none'">
       <div id="status-text">Loading…</div>
       <progress id="progress-bar" value="0" max="1"></progress>
-      <div id="progress-label"></div>
+      <div id="progress-label">Downloading game data (~67 MB)</div>
     </div>
 
     <!-- Emscripten canvas — always in the DOM with proper dimensions for SDL3.
@@ -234,6 +234,7 @@
 
     <!-- Toolbar (appears once game starts) -->
     <div id="toolbar">
+      <a href="index.html" class="btn" style="text-decoration:none;">← Home</a>
       <button class="btn" onclick="toggleFullscreen()">⛶ Fullscreen</button>
       <button class="btn" id="btn-mute" onclick="toggleMute()">🔊 Unmute</button>
       <button class="btn" id="btn-fence">✓ Fences On</button>
@@ -422,6 +423,17 @@
 
       print:    function (t) { console.log('[Bugdom]', t); },
       printErr: function (t) { console.error('[Bugdom]', t); },
+
+      // Ensure config/save directories exist in the virtual filesystem
+      preRun: [function () {
+        try {
+          var dirs = ['/home', '/home/web_user', '/home/web_user/.config',
+                      '/home/web_user/.config/Bugdom'];
+          for (var i = 0; i < dirs.length; i++) {
+            try { Module.FS.mkdir(dirs[i]); } catch (e) { /* already exists */ }
+          }
+        } catch (e) { /* FS not ready yet — no-op */ }
+      }],
     };
 
     // ── XHR progress for .data file ───────────────────────
