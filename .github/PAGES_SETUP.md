@@ -28,13 +28,31 @@ The site will be available at: `https://[your-username].github.io/[repo-name]/`
 
 The GitHub Pages site includes:
 
-- **Landing page** (`docs/index.html`) — Main page with game information and controls
+- **Landing page** (`docs/index.html`) — Main page with game information, level select, and controls
+- **Game page** (`docs/shell.html` → built as `Bugdom.html` → deployed as `game.html`) — The actual game shell with:
+  - Loading overlay with progress bar
+  - Fullscreen, mute, and fence toggle toolbar
+  - Developer tools panel (shown with `?dev` URL parameter)
+  - API documentation
 - **Game files** — All WebAssembly files needed to run the game:
-  - `Bugdom.html` → renamed to `game.html`
   - `Bugdom.js` — JavaScript glue code
   - `Bugdom.wasm` — WebAssembly binary
   - `Bugdom.data` — Game data packaged by Emscripten
-- **Assets** — Screenshot and other resources
+- **Assets** — Screenshots, PDFs, and other resources from `docs/`
+
+## Site Structure
+
+```
+gh-pages/
+├── index.html          ← docs/index.html (landing page)
+├── game.html           ← Built from docs/shell.html (game shell)
+├── Bugdom.js           ← Emscripten glue code
+├── Bugdom.wasm         ← WebAssembly binary
+├── Bugdom.data         ← Packaged game data
+├── screenshot.webp     ← Game screenshot
+├── Instructions*.pdf   ← Game manuals
+└── .nojekyll           ← Prevents Jekyll processing
+```
 
 ## Local Testing
 
@@ -55,6 +73,11 @@ To test the site locally before deploying:
 ## Workflow Configuration
 
 The workflow includes several important features:
+
+### Emscripten SDK Installation
+The workflow uses `git clone` to install the Emscripten SDK (instead of the
+`mymindstorm/setup-emsdk` action) to avoid network failures during SDK updates.
+The SDK is cached between runs for faster builds.
 
 ### Permissions
 ```yaml
@@ -91,17 +114,21 @@ The workflow uses the `github-pages` environment, which provides protection rule
 
 ### Updating the Landing Page
 
-Edit `docs/index.html` to customize the landing page. Changes will be automatically deployed on the next push to `main`.
+Edit `docs/index.html` to customize the landing page. Changes will be automatically deployed on the next push to `master`.
+
+### Updating the Game Shell
+
+Edit `docs/shell.html` to customize the game page UI (loading screen, toolbar, developer panel). This file is used as the Emscripten `--shell-file` template during the build. The `{{{ SCRIPT }}}` placeholder is replaced with Emscripten's generated JavaScript.
 
 ### Modifying Game Settings
 
 The game supports URL parameters for customization:
-- `?level=N` — Start at level N
-- `?dev` — Enable developer tools
+- `?level=N` — Start at level N (0=Training, 1=Lawn, … 9=Ant King)
+- `?dev` — Enable developer tools panel
 - `?noFenceCollision=1` — Disable fence collisions
 - `?terrainFile=:Terrain:Custom.ter` — Load custom terrain
 
-See the landing page for more details on the JavaScript API.
+See the landing page and the [React Integration Guide](../docs/REACT-INTEGRATION-GUIDE.md) for more details on the JavaScript API.
 
 ## Troubleshooting
 
@@ -135,6 +162,9 @@ If you need to manually trigger a deployment:
 
 - `.github/workflows/WebAssemblyBuild.yml` — Main workflow file
 - `build_wasm.py` — WebAssembly build script
+- `docs/shell.html` — Game shell template (Emscripten `--shell-file`)
 - `docs/index.html` — Landing page
+- `docs/REACT-INTEGRATION-GUIDE.md` — Guide for embedding in React apps
+- `test_wasm_browser.py` — Playwright browser test
 - `dist-wasm/` — Output directory (generated, not in git)
 - `BUILD.md` — Build instructions including WebAssembly
