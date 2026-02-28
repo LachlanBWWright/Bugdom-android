@@ -28,6 +28,7 @@ A port of the sequel is also available: [Bugdom 2](https://github.com/jorio/Bugd
 - [BUILD.md](BUILD.md) — How to build on macOS, Windows or Linux.
 - [CHANGELOG.md](CHANGELOG.md) — Bugdom version history.
 - [LICENSE.md](LICENSE.md) — Licensing information (see also below).
+- [REACT-INTEGRATION-GUIDE.md](docs/REACT-INTEGRATION-GUIDE.md) — How to embed the WebAssembly build in a React app.
 - [Instructions.pdf](docs/Instructions.pdf) — Original instruction manual. Int'l versions:
     [DE](docs/Instructions-DE.pdf)
     [EN](docs/Instructions-EN.pdf)

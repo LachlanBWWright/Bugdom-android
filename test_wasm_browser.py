@@ -81,8 +81,8 @@ async def run_test(url: str) -> bool:
         print("Waiting for data download...")
         try:
             await page.wait_for_function(
-                "document.getElementById('loading-card')?.style.display === 'none' || "
-                "document.getElementById('status-text')?.textContent?.includes('Running')",
+                "document.getElementById('status-text')?.textContent?.includes('Click to Play') || "
+                "document.getElementById('loading-card')?.style.display === 'none'",
                 timeout=90000
             )
         except Exception:
@@ -96,7 +96,7 @@ async def run_test(url: str) -> bool:
             for e in real_errors:
                 print(f"  {e}")
 
-        # --- Start game ---
+        # --- Start game (click loading card to dismiss overlay and start) ---
         print("Starting game (clicking loading card)...")
         await page.evaluate("document.getElementById('loading-card')?.click()")
 

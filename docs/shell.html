@@ -58,6 +58,15 @@
       border-radius: 10px;
       padding: 2rem 1.5rem;
       text-align: center;
+      transition: border-color 0.2s;
+    }
+    #loading-card:hover {
+      border-color: var(--accent);
+    }
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 2rem 1.5rem;
+      text-align: center;
     }
     #loading-card img {
       max-width: 320px;
@@ -308,27 +317,50 @@
       canvas: document.getElementById('canvas'),
 
       onRuntimeInitialized: function () {
-        // Hide loading overlay, show toolbar
+        // Change loading card to "Click to Play"
         var card = document.getElementById('loading-card');
-        if (card) card.style.display = 'none';
-        var tb = document.getElementById('toolbar');
-        if (tb) tb.style.display = 'flex';
+        var st = document.getElementById('status-text');
+        var bar = document.getElementById('progress-bar');
+        var lbl = document.getElementById('progress-label');
+        if (st) st.textContent = '🎮 Click to Play';
+        if (st) st.style.cursor = 'pointer';
+        if (bar) bar.style.display = 'none';
+        if (lbl) lbl.textContent = 'Click anywhere on this card to start';
 
-        // Show dev panel if ?dev is in URL
-        if (new URLSearchParams(window.location.search).has('dev')) {
-          var panel = document.getElementById('api-panel');
-          if (panel) panel.style.display = '';
-        }
+        // Click handler: hide card, show toolbar, resume audio
+        function startGame() {
+          if (card) card.style.display = 'none';
+          var tb = document.getElementById('toolbar');
+          if (tb) tb.style.display = 'flex';
 
-        // Apply URL parameters
-        var params = new URLSearchParams(window.location.search);
-        if (params.has('noFenceCollision')) {
+          // Focus the canvas so it receives keyboard input
+          var c = document.getElementById('canvas');
+          if (c) c.focus();
+
+          // Resume audio context (browsers require user gesture)
           try {
-            Module.ccall('BugdomSetFenceCollision', null, ['number'], [0]);
-            _fenceEnabled = false;
-            updateFenceUI();
+            var ctx = Module.SDL2 && Module.SDL2.audioContext;
+            if (ctx && ctx.state === 'suspended') ctx.resume();
           } catch (e) { /* ignore */ }
+
+          // Show dev panel if ?dev is in URL
+          if (new URLSearchParams(window.location.search).has('dev')) {
+            var panel = document.getElementById('api-panel');
+            if (panel) panel.style.display = '';
+          }
+
+          // Apply URL parameters
+          var params = new URLSearchParams(window.location.search);
+          if (params.has('noFenceCollision')) {
+            try {
+              Module.ccall('BugdomSetFenceCollision', null, ['number'], [0]);
+              _fenceEnabled = false;
+              updateFenceUI();
+            } catch (e) { /* ignore */ }
+          }
         }
+
+        if (card) card.addEventListener('click', startGame);
       },
 
       setStatus: function (text) {
