@@ -192,6 +192,17 @@
       border-top: 1px solid var(--border);
     }
     #footer a { color: var(--dim); }
+
+    /* ── Mobile responsive ───────────────────────────────── */
+    @media (max-width: 640px) {
+      #header h1 { font-size: 1.4rem; }
+      #header p { font-size: 0.75rem; }
+      #loading-card { padding: 1rem; }
+      #loading-card img { max-width: 200px; }
+      .api-row { flex-direction: column; align-items: flex-start; }
+      .api-row label { min-width: auto; }
+      input[type="text"] { min-width: 0; width: 100%; }
+    }
   </style>
 </head>
 <body>
@@ -261,6 +272,14 @@
         <label>Terrain file path</label>
         <input type="text" id="terrain-path" placeholder=":Terrain:Custom.ter">
         <button class="btn" onclick="applyTerrain()">Apply</button>
+      </div>
+      <div class="api-row">
+        <label>Upload .ter file</label>
+        <input type="file" id="terrain-upload" accept=".ter" style="font-size:0.85rem;color:var(--dim);">
+        <span class="sub" style="font-size:0.78rem;color:var(--dim);margin-top:4px;">
+          Upload a <code>.ter</code> file to inject into the WASM virtual filesystem under
+          <code>/Data/Terrain/</code>. Uses <code>Module.FS.writeFile()</code>.
+        </span>
       </div>
     </div>
 
@@ -446,6 +465,32 @@
       }
     }
 
+    // Terrain file upload handler
+    (function () {
+      var input = document.getElementById('terrain-upload');
+      if (!input) return;
+      input.addEventListener('change', function () {
+        var file = this.files && this.files[0];
+        if (!file) return;
+        var reader = new FileReader();
+        reader.onload = function () {
+          var data = new Uint8Array(reader.result);
+          var vfsPath = '/Data/Terrain/' + file.name;
+          try {
+            Module.FS.writeFile(vfsPath, data);
+            var colonPath = ':Terrain:' + file.name;
+            Module.ccall('BugdomSetTerrainOverride', null, ['string'], [colonPath]);
+            var tp = document.getElementById('terrain-path');
+            if (tp) tp.value = colonPath;
+            console.log('Injected ' + vfsPath + ' (' + data.length + ' bytes)');
+          } catch (e) {
+            console.warn('Failed to inject terrain file:', e);
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      });
+    })();
+
     function toggleFullscreen() {
       var c = document.getElementById('canvas');
       if (!c) return;
@@ -488,6 +533,28 @@
         }
       } catch (e) { /* ignore */ }
     }, 1000);
+
+    // WebGL context loss / error handling
+    (function () {
+      var c = document.getElementById('canvas');
+      if (!c) return;
+      c.addEventListener('webglcontextlost', function (e) {
+        e.preventDefault();
+        var st = document.getElementById('status-text');
+        var card = document.getElementById('loading-card');
+        if (card) card.style.display = '';
+        if (st) st.textContent = '⚠️ WebGL context lost — please reload the page';
+      });
+    })();
+
+    // Handle Module abort (e.g. out of memory)
+    Module.onAbort = function (what) {
+      console.error('[Bugdom] ABORT:', what);
+      var st = document.getElementById('status-text');
+      var card = document.getElementById('loading-card');
+      if (card) card.style.display = '';
+      if (st) st.textContent = '⚠️ Game crashed — ' + (what || 'unknown error');
+    };
   </script>
 
   {{{ SCRIPT }}}
