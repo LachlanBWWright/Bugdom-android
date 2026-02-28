@@ -328,6 +328,26 @@
 
   <!-- ── JavaScript ────────────────────────────────────── -->
   <script>
+    // ── Feature detection ─────────────────────────────────
+    (function () {
+      var missing = [];
+      if (typeof WebAssembly === 'undefined') missing.push('WebAssembly');
+      try {
+        var c = document.createElement('canvas');
+        if (!c.getContext('webgl') && !c.getContext('experimental-webgl'))
+          missing.push('WebGL');
+      } catch (e) { missing.push('WebGL'); }
+      if (missing.length > 0) {
+        var st = document.getElementById('status-text');
+        var bar = document.getElementById('progress-bar');
+        var lbl = document.getElementById('progress-label');
+        if (st) st.textContent = '⚠️ Browser not supported';
+        if (bar) bar.style.display = 'none';
+        if (lbl) lbl.textContent = 'Missing: ' + missing.join(', ') +
+          '. Please use a modern browser (Chrome, Firefox, Edge, Safari).';
+      }
+    })();
+
     // ── Emscripten Module configuration ───────────────────
     var _fenceEnabled = true;
     var _muted = false;
