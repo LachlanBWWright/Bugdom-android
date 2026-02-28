@@ -309,7 +309,8 @@
           <option value="8">8 – Ant Hill</option>
           <option value="9">9 – Ant King</option>
         </select>
-        <span class="sub">Use <code>?level=N</code> in URL to start at this level</span>
+        <button class="btn" onclick="goToLevel()">Go</button>
+        <span class="sub">Reloads the page with <code>?level=N</code> to start at this level</span>
       </div>
     </div>
 
@@ -562,6 +563,16 @@
       panel.style.display = visible ? 'none' : '';
       var btn = document.getElementById('btn-dev');
       if (btn) btn.className = 'btn' + (visible ? '' : ' on');
+    }
+
+    function goToLevel() {
+      var sel = document.getElementById('level-select');
+      if (!sel) return;
+      var lvl = sel.value;
+      var url = new URL(window.location.href);
+      url.searchParams.set('level', lvl);
+      url.searchParams.set('dev', '');
+      window.location.href = url.toString();
     }
 
     // Periodically update current level display
