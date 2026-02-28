@@ -305,13 +305,14 @@ if(EMSCRIPTEN)
 	target_link_options(${GAME_TARGET} PRIVATE
 		-sASYNCIFY=1
 		-sASYNCIFY_STACK_SIZE=65536
+		-sDISABLE_EXCEPTION_CATCHING=0
 		-sALLOW_MEMORY_GROWTH=1
 		-sMAXIMUM_MEMORY=512MB
 		-sFULL_ES2=1
-		-sEXPORTED_RUNTIME_METHODS=ccall,cwrap
+		-sEXPORTED_RUNTIME_METHODS=ccall,cwrap,FS
 		-sEXPORTED_FUNCTIONS=_main,_BugdomSetFenceCollision,_BugdomGetFenceCollision,_BugdomGetCurrentLevel,_BugdomSetTerrainOverride
 		"SHELL:--preload-file ${GAME_DATADIR}@/Data"
-		"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/packaging/emscripten_shell.html"
+		"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/docs/shell.html"
 	)
 
 	# Don't copy data files since they're embedded via --preload-file

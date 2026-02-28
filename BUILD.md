@@ -45,6 +45,8 @@ To build Bugdom for WebAssembly and test it in a browser:
 
 The WebAssembly build is automatically deployed to [GitHub Pages](https://lachlanbwwright.github.io/Bugdom-android/) on every push to the `master` branch via GitHub Actions.
 
+For more details on Emscripten/WebAssembly porting, see the [SDL WASM Porting Guide](https://github.com/LachlanBWWright/OttoMatic-Android/blob/master/docs/SDL-WASM-PORTING-GUIDE.md).
+
 ---
 
 If you want to build the game **manually** instead, the rest of this document describes how to do just that on each of the big 3 desktop operating systems.

@@ -3,6 +3,12 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="Play Bugdom in your browser — a classic 3D platformer by Pangea Software, now running via WebAssembly. No installation required.">
+  <meta property="og:title" content="Bugdom – Play in Browser">
+  <meta property="og:description" content="Control Rollie McFly in this classic 3D platformer — now playable in your browser via WebAssembly.">
+  <meta property="og:image" content="screenshot.webp">
+  <meta property="og:type" content="website">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🐛</text></svg>">
   <title>Bugdom – Play in Browser</title>
   <style>
     :root {
@@ -146,11 +152,11 @@
         <tr><td>0</td><td>Training</td><td>Lawn</td><td><a href="game.html?level=0">Play →</a></td></tr>
         <tr><td>1</td><td>Lawn</td><td>Lawn</td><td><a href="game.html?level=1">Play →</a></td></tr>
         <tr><td>2</td><td>Pond</td><td>Pond</td><td><a href="game.html?level=2">Play →</a></td></tr>
-        <tr><td>3</td><td>Beach</td><td>Forest</td><td><a href="game.html?level=3">Play →</a></td></tr>
-        <tr><td>4</td><td>Dragonfly Attack</td><td>Forest (Boss)</td><td><a href="game.html?level=4">Play →</a></td></tr>
+        <tr><td>3</td><td>Forest</td><td>Forest</td><td><a href="game.html?level=3">Play →</a></td></tr>
+        <tr><td>4</td><td>Hive Attack</td><td>Hive</td><td><a href="game.html?level=4">Play →</a></td></tr>
         <tr><td>5</td><td>Bee Hive</td><td>Hive</td><td><a href="game.html?level=5">Play →</a></td></tr>
         <tr><td>6</td><td>Queen Bee</td><td>Hive (Boss)</td><td><a href="game.html?level=6">Play →</a></td></tr>
-        <tr><td>7</td><td>Night</td><td>Night</td><td><a href="game.html?level=7">Play →</a></td></tr>
+        <tr><td>7</td><td>Night Attack</td><td>Night</td><td><a href="game.html?level=7">Play →</a></td></tr>
         <tr><td>8</td><td>Ant Hill</td><td>Anthill</td><td><a href="game.html?level=8">Play →</a></td></tr>
         <tr><td>9</td><td>Ant King</td><td>Anthill (Boss)</td><td><a href="game.html?level=9">Play →</a></td></tr>
       </tbody>
@@ -226,12 +232,40 @@ window.BUGDOM_NO_FENCE_COLLISION = true;          // disable fence collisions
     </div>
   </div>
 
+  <div class="section">
+    <h2>Documentation</h2>
+    <div class="grid">
+      <div class="card">
+        <h3>📖 Game Manual</h3>
+        <p>Original instruction manuals:
+          <a href="Instructions.pdf" style="color:var(--accent)">EN</a> ·
+          <a href="Instructions-DE.pdf" style="color:var(--accent)">DE</a> ·
+          <a href="Instructions-FR.pdf" style="color:var(--accent)">FR</a> ·
+          <a href="Instructions-ES.pdf" style="color:var(--accent)">ES</a> ·
+          <a href="Instructions-IT.pdf" style="color:var(--accent)">IT</a> ·
+          <a href="Instructions-JA.pdf" style="color:var(--accent)">JA</a> ·
+          <a href="Instructions-SV.pdf" style="color:var(--accent)">SV</a>
+        </p>
+      </div>
+      <div class="card">
+        <h3>⚛️ React Integration</h3>
+        <p>Embed the game in a React app. See the
+          <a href="https://github.com/LachlanBWWright/Bugdom-android/blob/master/docs/REACT-INTEGRATION-GUIDE.md"
+             style="color:var(--accent)">React Integration Guide</a>.
+        </p>
+      </div>
+    </div>
+  </div>
+
 </div>
 
 <footer>
   <p>Bugdom © 1999 Pangea Software, Inc. &mdash; Source port by Iliyas Jorio &mdash; Android &amp; WebAssembly port</p>
   <p style="margin-top:8px">
     <a href="https://github.com/LachlanBWWright/Bugdom-android" style="color:var(--muted)">GitHub</a>
+    &middot;
+    <a href="https://github.com/LachlanBWWright/OttoMatic-Android/blob/master/docs/SDL-WASM-PORTING-GUIDE.md"
+       style="color:var(--muted)">SDL WASM Porting Guide</a>
   </p>
 </footer>
 

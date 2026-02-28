@@ -236,6 +236,17 @@ void GetDefaultWindowSize(SDL_DisplayID display, int* width, int* height)
 		*width = displayBounds.w * screenCoverage;
 		*height = displayBounds.w * screenCoverage / aspectRatio;
 	}
+
+#ifdef __EMSCRIPTEN__
+	// Ensure a minimum window size for Emscripten builds.
+	// In some environments, SDL_GetDisplayUsableBounds may return very small
+	// values (e.g. headless browsers), leading to a tiny canvas.
+	if (*width < 640 || *height < 480)
+	{
+		*width = 1280;
+		*height = 720;
+	}
+#endif
 }
 
 /******************** GET NUM DISPLAYS *******************/
