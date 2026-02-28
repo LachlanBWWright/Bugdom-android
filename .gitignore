@@ -19,3 +19,6 @@ extern/SDL*
 .DS_Store
 _codeql_detected_source_root
 dist-wasm/
+
+# Emscripten SDK (cached in CI)
+.emsdk/

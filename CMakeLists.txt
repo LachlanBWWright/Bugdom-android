@@ -311,7 +311,7 @@ if(EMSCRIPTEN)
 		-sEXPORTED_RUNTIME_METHODS=ccall,cwrap
 		-sEXPORTED_FUNCTIONS=_main,_BugdomSetFenceCollision,_BugdomGetFenceCollision,_BugdomGetCurrentLevel,_BugdomSetTerrainOverride
 		"SHELL:--preload-file ${GAME_DATADIR}@/Data"
-		"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/packaging/emscripten_shell.html"
+		"SHELL:--shell-file ${CMAKE_SOURCE_DIR}/docs/shell.html"
 	)
 
 	# Don't copy data files since they're embedded via --preload-file
