@@ -89,6 +89,13 @@
     }
     #progress-label { font-size: 0.78rem; color: var(--dim); }
 
+    /* Loading spinner animation */
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    #loading-card #status-text { animation: pulse 2s ease-in-out infinite; }
+
     /* Canvas */
     #canvas {
       max-width: 100%;
@@ -403,6 +410,13 @@
               _fenceEnabled = false;
               updateFenceUI();
             } catch (e) { /* ignore */ }
+          }
+
+          // Pre-select current level in dropdown
+          var levelParam = params.get('level');
+          if (levelParam !== null) {
+            var sel = document.getElementById('level-select');
+            if (sel) sel.value = levelParam;
           }
         }
 
