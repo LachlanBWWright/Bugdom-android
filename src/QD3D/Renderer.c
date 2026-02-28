@@ -774,48 +774,48 @@ void* converted = NULL;
 GLenum glFormat = bufferFormat;
 GLenum glType   = bufferType;
 
+// First, strip row padding if present (WebGL 1 has no GL_UNPACK_ROW_LENGTH).
+const GLvoid* srcPixels = pixels;
+uint8_t* rowStripped = NULL;
+if (rowBytesInInput > 0)
+{
+int bpp = 4;
+if (bufferFormat == GL_RGB || bufferFormat == GL_BGR) bpp = 3;
+else if (bufferFormat == GL_ALPHA) bpp = 1;
+else if (bufferType == GL_UNSIGNED_SHORT_1_5_5_5_REV) bpp = 2;
+int lineBytes = width * bpp;
+rowStripped = (uint8_t*) AllocPtr(height * lineBytes);
+const uint8_t* src = (const uint8_t*) pixels;
+for (int row = 0; row < height; row++)
+SDL_memcpy(rowStripped + row * lineBytes, src + row * rowBytesInInput, lineBytes);
+srcPixels = rowStripped;
+}
+
 if (bufferFormat == GL_BGRA && bufferType == GL_UNSIGNED_INT_8_8_8_8_REV)
 {
-	converted = ConvertBGRA32ToRGBA(pixels, width, height);
+	converted = ConvertBGRA32ToRGBA(srcPixels, width, height);
 	glFormat  = GL_RGBA;
 	glType    = GL_UNSIGNED_BYTE;
 }
 else if (bufferFormat == GL_BGR && bufferType == GL_UNSIGNED_BYTE)
 {
-	converted = ConvertBGR24ToRGB(pixels, width, height);
+	converted = ConvertBGR24ToRGB(srcPixels, width, height);
 	glFormat  = GL_RGB;
 }
 else if (bufferFormat == GL_BGRA && bufferType == GL_UNSIGNED_SHORT_1_5_5_5_REV)
 {
-	converted = Convert1555ToRGBA8(pixels, width, height, true);
+	converted = Convert1555ToRGBA8(srcPixels, width, height, true);
 	glFormat  = GL_RGBA;
 	glType    = GL_UNSIGNED_BYTE;
 }
 
-const GLvoid* uploadPixels = converted ? converted : pixels;
-
-// WebGL 1 does not support GL_UNPACK_ROW_LENGTH.
-// Copy to a contiguous temp buffer when rowBytesInInput is given.
-if (rowBytesInInput > 0 && !converted)
-{
-int bpp = 4;
-if (glFormat == GL_RGB)        bpp = 3;
-else if (glFormat == GL_ALPHA) bpp = 1;
-int lineBytes = width * bpp;
-uint8_t* tmp = (uint8_t*) AllocPtr(height * lineBytes);
-const uint8_t* src = (const uint8_t*) uploadPixels;
-for (int row = 0; row < height; row++)
-SDL_memcpy(tmp + row * lineBytes, src + row * rowBytesInInput, lineBytes);
-glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, glFormat, glType, tmp);
-DisposePtr((Ptr) tmp);
-}
-else
-{
+const GLvoid* uploadPixels = converted ? converted : srcPixels;
 glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, width, height, glFormat, glType, uploadPixels);
-}
 
 if (converted)
 DisposePtr((Ptr) converted);
+if (rowStripped)
+DisposePtr((Ptr) rowStripped);
 #else
 GLint pUnpackRowLength = 0;
 if (rowBytesInInput > 0)
